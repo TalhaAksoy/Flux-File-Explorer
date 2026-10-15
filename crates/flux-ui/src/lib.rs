@@ -367,7 +367,8 @@ impl FluxApp {
                     egui::TextEdit::singleline(&mut self.palette_query)
                         .desired_width(f32::INFINITY)
                         .hint_text("Type a command…")
-                        .font(egui::FontId::proportional(15.0)),
+                        .margin(egui::Margin::symmetric(12, 8))
+                        .font(egui::FontId::proportional(15.5)),
                 );
                 resp.request_focus();
                 let q = self.palette_query.to_lowercase();
@@ -383,7 +384,7 @@ impl FluxApp {
                     let selected = i == self.palette_sel;
                     let w = ui.available_width();
                     let (rect, resp2) =
-                        ui.allocate_exact_size(egui::vec2(w, 26.0), egui::Sense::click());
+                        ui.allocate_exact_size(egui::vec2(w, 30.0), egui::Sense::click());
                     let fill = if selected {
                         pal.accent_fill
                     } else if resp2.hovered() {
@@ -399,10 +400,10 @@ impl FluxApp {
                         );
                     }
                     ui.painter().text(
-                        egui::pos2(rect.left() + 10.0, rect.center().y),
+                        egui::pos2(rect.left() + 12.0, rect.center().y),
                         egui::Align2::LEFT_CENTER,
                         c.name,
-                        egui::FontId::proportional(13.0),
+                        egui::FontId::proportional(13.5),
                         pal.text_primary,
                     );
                     if resp2.clicked() {

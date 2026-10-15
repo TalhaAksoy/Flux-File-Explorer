@@ -169,10 +169,10 @@ pub fn icon_row(
     );
     paint(ui.painter(), ir, if selected { pal.text_primary } else { text_col });
     ui.painter().text(
-        Pos2::new(rect.left() + h * 1.14, rect.center().y),
+        Pos2::new(rect.left() + h * 1.1, rect.center().y),
         egui::Align2::LEFT_CENTER,
         label,
-        egui::FontId::proportional(13.5),
+        egui::FontId::proportional(14.0),
         text_col,
     );
     resp

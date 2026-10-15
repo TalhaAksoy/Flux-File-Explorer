@@ -63,6 +63,7 @@ pub fn show(app: &mut FluxApp, ctx: &egui::Context) {
                 let resp = ui.add(
                     egui::TextEdit::singleline(input)
                         .desired_width(320.0)
+                        .margin(egui::Margin::symmetric(12, 9))
                         .font(egui::TextStyle::Heading),
                 );
                 resp.request_focus();
@@ -105,6 +106,7 @@ pub fn show(app: &mut FluxApp, ctx: &egui::Context) {
                 let r = ui.add(
                     egui::TextEdit::singleline(input)
                         .desired_width(320.0)
+                        .margin(egui::Margin::symmetric(12, 9))
                         .hint_text("Folder name"),
                 );
                 r.request_focus();
@@ -140,6 +142,7 @@ pub fn show(app: &mut FluxApp, ctx: &egui::Context) {
                 let r = ui.add(
                     egui::TextEdit::singleline(input)
                         .desired_width(320.0)
+                        .margin(egui::Margin::symmetric(12, 9))
                         .hint_text("File name"),
                 );
                 r.request_focus();
@@ -179,11 +182,11 @@ pub fn show(app: &mut FluxApp, ctx: &egui::Context) {
                                 egui::Button::new(
                                     egui::RichText::new("Delete")
                                         .color(egui::Color32::WHITE)
-                                        .size(13.5),
+                                        .size(14.0),
                                 )
                                 .fill(ui.visuals().error_fg_color)
                                 .corner_radius(egui::CornerRadius::same(7))
-                                .min_size(egui::vec2(80.0, 30.0)),
+                                .min_size(egui::vec2(88.0, 32.0)),
                             )
                             .clicked()
                         {
@@ -222,11 +225,11 @@ pub fn show(app: &mut FluxApp, ctx: &egui::Context) {
                                 egui::Button::new(
                                     egui::RichText::new("Delete permanently")
                                         .color(egui::Color32::WHITE)
-                                        .size(13.5),
+                                        .size(14.0),
                                 )
                                 .fill(ui.visuals().error_fg_color)
                                 .corner_radius(egui::CornerRadius::same(7))
-                                .min_size(egui::vec2(80.0, 30.0)),
+                                .min_size(egui::vec2(88.0, 32.0)),
                             )
                             .clicked()
                         {
@@ -378,12 +381,12 @@ const PREVIEW_CAP: usize = 2_000;
 fn chip(ui: &mut egui::Ui, label: &str, on: bool) -> egui::Response {
     let accent = ui.visuals().selection.stroke.color;
     let mut b = egui::Button::new(if on {
-        egui::RichText::new(label).color(egui::Color32::WHITE).size(12.5)
+        egui::RichText::new(label).color(egui::Color32::WHITE).size(13.0)
     } else {
-        egui::RichText::new(label).size(12.5)
+        egui::RichText::new(label).size(13.0)
     })
-    .corner_radius(egui::CornerRadius::same(13))
-    .min_size(egui::vec2(0.0, 24.0));
+    .corner_radius(egui::CornerRadius::same(14))
+    .min_size(egui::vec2(0.0, 28.0));
     if on {
         b = b.fill(accent).stroke(egui::Stroke::NONE);
     }
@@ -408,7 +411,7 @@ fn bulk_rename_dialog(app: &mut FluxApp, br: &mut BulkRenameState, ctx: &egui::C
             // Core flow: find → replace → preview → rename.
             ui.label(egui::RichText::new("Find").weak().small());
             let find_r = ui.add(
-                egui::TextEdit::singleline(&mut br.find).desired_width(f32::INFINITY),
+                egui::TextEdit::singleline(&mut br.find).desired_width(f32::INFINITY).margin(egui::Margin::symmetric(10, 8)),
             );
             if find_r.changed() {
                 br.dirty = true;
@@ -417,7 +420,7 @@ fn bulk_rename_dialog(app: &mut FluxApp, br: &mut BulkRenameState, ctx: &egui::C
             ui.add_space(6.0);
             ui.label(egui::RichText::new("Replace with").weak().small());
             if ui
-                .add(egui::TextEdit::singleline(&mut br.replace).desired_width(f32::INFINITY))
+                .add(egui::TextEdit::singleline(&mut br.replace).desired_width(f32::INFINITY).margin(egui::Margin::symmetric(10, 8)))
                 .changed()
             {
                 br.dirty = true;
@@ -473,6 +476,7 @@ fn bulk_rename_dialog(app: &mut FluxApp, br: &mut BulkRenameState, ctx: &egui::C
                         .add(
                             egui::TextEdit::singleline(&mut br.template)
                                 .desired_width(f32::INFINITY)
+                                .margin(egui::Margin::symmetric(10, 8))
                                 .hint_text("{name}{ext}"),
                         )
                         .changed()

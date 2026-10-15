@@ -58,7 +58,7 @@ pub fn toolbar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
     // deserves bigger hit targets and text. Scoped to this Ui only.
     {
         let st = ui.style_mut();
-        st.spacing.interact_size.y = 30.0;
+        st.spacing.interact_size.y = 32.0;
         st.text_styles
             .insert(egui::TextStyle::Body, egui::FontId::proportional(15.0));
         st.text_styles
@@ -86,8 +86,10 @@ pub fn toolbar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
         if let Some(text) = &mut app.address_edit {
             let id = egui::Id::new("address_bar");
             let resp = ui.add_sized(
-                [ui.available_width() - 260.0, 22.0],
-                egui::TextEdit::singleline(text).id(id),
+                [ui.available_width() - 260.0, 26.0],
+                egui::TextEdit::singleline(text)
+                    .margin(egui::Margin::symmetric(10, 4))
+                    .id(id),
             );
             if app.focus_address {
                 app.focus_address = false;
@@ -182,8 +184,9 @@ pub fn toolbar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             // Search mode toggle + filter/search box.
             let resp = ui.add_sized(
-                [190.0, 22.0],
+                [200.0, 26.0],
                 egui::TextEdit::singleline(&mut app.filter_text)
+                    .margin(egui::Margin::symmetric(10, 4))
                     .hint_text(if app.search_ui.active {
                         "Search subfolders…"
                     } else {
@@ -220,7 +223,7 @@ pub fn toolbar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
 /// Left sidebar: places, bookmarks, volumes.
 pub fn sidebar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
     // Taller rows — comfortable hit targets, the pill gets real padding.
-    ui.style_mut().spacing.interact_size.y = 28.0;
+    ui.style_mut().spacing.interact_size.y = 32.0;
     ui.add_space(6.0);
     let pal = crate::theme::Palette::of(&ui.style().visuals);
     let current = app.current_path();

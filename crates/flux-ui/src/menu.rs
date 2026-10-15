@@ -55,18 +55,18 @@ fn item_full(ui: &mut Ui, label: &str, sc: Option<&str>, enabled: bool) -> Respo
     let w = ui.available_width();
     // Left offset reserves a checkmark/icon column.
     let mut b = Button::new(RichText::new(""))
-        .min_size(Vec2::new(w, 26.0))
+        .min_size(Vec2::new(w, 30.0))
         .frame_when_inactive(false);
     if let Some(s) = sc {
         b = b.right_text(RichText::new(s).weak().small());
     }
     let r = ui.add_enabled(enabled, b);
-    let label_x = r.rect.left() + 24.0;
+    let label_x = r.rect.left() + 26.0;
     ui.painter().text(
         egui::pos2(label_x, r.rect.center().y),
         egui::Align2::LEFT_CENTER,
         label,
-        egui::FontId::proportional(13.0),
+        egui::FontId::proportional(13.5),
         if enabled {
             ui.visuals().text_color()
         } else {
@@ -81,7 +81,7 @@ pub fn item_check(ui: &mut Ui, label: &str, checked: bool) -> Response {
     let r = item_full(ui, label, None, true);
     if checked {
         let accent = ui.visuals().selection.stroke.color;
-        let center = egui::pos2(r.rect.left() + 12.0, r.rect.center().y);
+        let center = egui::pos2(r.rect.left() + 13.0, r.rect.center().y);
         let p = ui.painter();
         p.line_segment(
             [center + Vec2::new(-3.0, 0.5), center + Vec2::new(-1.0, 2.5)],
@@ -104,7 +104,7 @@ pub fn submenu<R>(
     let w = ui.available_width();
     // Leading spaces align the trigger label with the items' check column.
     let btn = Button::new(RichText::new(format!("    {label}")))
-        .min_size(Vec2::new(w, 26.0))
+        .min_size(Vec2::new(w, 30.0))
         .frame_when_inactive(false)
         .right_text("›");
     let (_r, inner) = SubMenuButton::from_button(btn).ui(ui, |sub| {
@@ -114,8 +114,8 @@ pub fn submenu<R>(
             st.spacing.item_spacing = Vec2::new(0.0, 1.0);
             st.spacing.button_padding = Vec2::new(10.0, 5.0);
         }
-        sub.set_min_width(170.0);
-        sub.set_max_width(190.0);
+        sub.set_min_width(180.0);
+        sub.set_max_width(210.0);
         add_contents(sub)
     });
     let _ = inner;
@@ -152,10 +152,10 @@ pub fn section(ui: &mut Ui, label: &str) {
 pub fn primary_button(ui: &mut Ui, label: &str) -> Response {
     let accent = ui.visuals().selection.stroke.color;
     ui.add(
-        Button::new(RichText::new(label).color(Color32::WHITE).size(13.5))
+        Button::new(RichText::new(label).color(Color32::WHITE).size(14.0))
             .fill(accent)
             .corner_radius(CornerRadius::same(7))
-            .min_size(Vec2::new(80.0, 30.0)),
+            .min_size(Vec2::new(88.0, 32.0)),
     )
 }
 
@@ -164,6 +164,6 @@ pub fn ghost_button(ui: &mut Ui, label: &str) -> Response {
     ui.add(
         Button::new(label)
             .corner_radius(CornerRadius::same(7))
-            .min_size(Vec2::new(80.0, 30.0)),
+            .min_size(Vec2::new(88.0, 32.0)),
     )
 }
