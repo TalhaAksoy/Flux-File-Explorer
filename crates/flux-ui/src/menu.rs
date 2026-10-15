@@ -5,9 +5,7 @@
 //! `SubMenuButton`'s state lookup walks the stack for a Menu root.
 
 use egui::containers::menu::{self, SubMenuButton};
-use egui::{
-    Button, Color32, CornerRadius, Frame, Margin, Response, RichText, Style, Ui, Vec2,
-};
+use egui::{Button, Color32, CornerRadius, Frame, Margin, Response, RichText, Style, Ui, Vec2};
 
 /// Rounded, softly shadowed popup surface.
 pub fn popup_frame(style: &Style) -> Frame {
@@ -96,11 +94,7 @@ pub fn item_check(ui: &mut Ui, label: &str, checked: bool) -> Response {
 }
 
 /// A nested submenu with a full-width trigger and a painted "›" arrow.
-pub fn submenu<R>(
-    ui: &mut Ui,
-    label: &str,
-    add_contents: impl FnOnce(&mut Ui) -> R,
-) {
+pub fn submenu<R>(ui: &mut Ui, label: &str, add_contents: impl FnOnce(&mut Ui) -> R) {
     let w = ui.available_width();
     // Leading spaces align the trigger label with the items' check column.
     let btn = Button::new(RichText::new(format!("    {label}")))

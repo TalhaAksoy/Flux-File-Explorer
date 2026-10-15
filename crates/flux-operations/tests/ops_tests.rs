@@ -1,10 +1,12 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::AtomicBool;
 use std::sync::Mutex;
+use std::sync::atomic::AtomicBool;
 use std::time::{Duration, Instant};
 
-use flux_operations::conflict::{ConflictAction, ConflictPolicy, keep_both_path, validate_filename};
+use flux_operations::conflict::{
+    ConflictAction, ConflictPolicy, keep_both_path, validate_filename,
+};
 use flux_operations::copy::{CopyCtx, copy_tree, discover};
 use flux_operations::progress::{OpProgress, OpState};
 use flux_operations::rename::{RenameRule, execute_renames, plan_renames};
@@ -18,14 +20,14 @@ fn tmp() -> (tempfile::TempDir, PathBuf) {
 
 fn write_file(dir: &Path, name: &str, contents: &[u8]) -> PathBuf {
     let p = dir.join(name);
-    std::fs::File::create(&p).unwrap().write_all(contents).unwrap();
+    std::fs::File::create(&p)
+        .unwrap()
+        .write_all(contents)
+        .unwrap();
     p
 }
 
-fn noop_ctx<'a>(
-    progress: &'a Mutex<OpProgress>,
-    cancel: &'a AtomicBool,
-) -> CopyCtx<'a> {
+fn noop_ctx<'a>(progress: &'a Mutex<OpProgress>, cancel: &'a AtomicBool) -> CopyCtx<'a> {
     CopyCtx {
         progress,
         cancel,
@@ -80,7 +82,11 @@ fn copy_tree_copies_nested_structure() {
         .unwrap()
         .map(|e| e.unwrap().file_name())
         .collect();
-    assert!(!names.iter().any(|n| n.to_string_lossy().contains("fluxpart")));
+    assert!(
+        !names
+            .iter()
+            .any(|n| n.to_string_lossy().contains("fluxpart"))
+    );
 }
 
 #[test]
@@ -137,10 +143,7 @@ fn plan_detects_duplicate_targets() {
     let (_t, dir) = tmp();
     let a = write_file(&dir, "a.txt", b"");
     let b = write_file(&dir, "b.txt", b"");
-    let plan = plan_renames(
-        &[a, b],
-        &[RenameRule::Template("same.txt".into())],
-    );
+    let plan = plan_renames(&[a, b], &[RenameRule::Template("same.txt".into())]);
     assert_eq!(plan[0].status, RenameStatus::Ready);
     assert_eq!(plan[1].status, RenameStatus::DuplicateTarget);
 }
@@ -150,10 +153,7 @@ fn plan_detects_disk_conflict() {
     let (_t, dir) = tmp();
     let a = write_file(&dir, "a.txt", b"");
     write_file(&dir, "exists.txt", b"");
-    let plan = plan_renames(
-        &[a],
-        &[RenameRule::Template("exists.txt".into())],
-    );
+    let plan = plan_renames(&[a], &[RenameRule::Template("exists.txt".into())]);
     assert_eq!(plan[0].status, RenameStatus::Conflict);
 }
 
@@ -166,10 +166,7 @@ fn plan_template_tokens() {
         &[a],
         &[RenameRule::Template("{parent}_{name}_{n:03}.{ext}".into())],
     );
-    assert_eq!(
-        plan[0].dst.file_name().unwrap(),
-        "subdir_photo_000.JPG"
-    );
+    assert_eq!(plan[0].dst.file_name().unwrap(), "subdir_photo_000.JPG");
 }
 
 #[test]
@@ -242,12 +239,13 @@ fn wait_op(engine: &OpEngine, id: u64, timeout: Duration) -> OpProgress {
             }
         }
         if let Ok(ops) = engine.ops.read()
-            && let Some(o) = ops.iter().find(|o| o.id == id) {
-                let p = o.progress_snapshot();
-                if p.state.is_finished() {
-                    return p;
-                }
+            && let Some(o) = ops.iter().find(|o| o.id == id)
+        {
+            let p = o.progress_snapshot();
+            if p.state.is_finished() {
+                return p;
             }
+        }
         if Instant::now() > deadline {
             panic!("op {id} did not finish");
         }
@@ -381,10 +379,7 @@ fn duplicate_creates_copy_with_suffix() {
     let (_t, dir) = tmp();
     let file = write_file(&dir, "report.txt", b"data");
     let engine = OpEngine::new();
-    let id = engine.submit(
-        OpKind::Duplicate { items: vec![file] },
-        ConflictPolicy::Ask,
-    );
+    let id = engine.submit(OpKind::Duplicate { items: vec![file] }, ConflictPolicy::Ask);
     let p = wait_op(&engine, id, Duration::from_secs(10));
     assert!(matches!(p.state, OpState::Done), "state: {:?}", p.state);
     assert!(dir.join("report.txt").exists());
@@ -415,10 +410,7 @@ fn duplicate_dir_copies_tree() {
     std::fs::create_dir(&src).unwrap();
     write_file(&src, "inner.txt", b"i");
     let engine = OpEngine::new();
-    let id = engine.submit(
-        OpKind::Duplicate { items: vec![src] },
-        ConflictPolicy::Ask,
-    );
+    let id = engine.submit(OpKind::Duplicate { items: vec![src] }, ConflictPolicy::Ask);
     wait_op(&engine, id, Duration::from_secs(10));
     assert_eq!(
         std::fs::read(dir.join("docs copy").join("inner.txt")).unwrap(),
@@ -448,12 +440,21 @@ fn compress_creates_valid_zip() {
     assert!(matches!(p.state, OpState::Done), "state: {:?}", p.state);
     assert!(dest.exists());
     let mut za = zip::ZipArchive::new(std::fs::File::open(&dest).unwrap()).unwrap();
-    let names: Vec<String> = (0..za.len()).filter_map(|i| za.by_index(i).ok().and_then(|e| e.name().ok().map(|n| n.into_owned()))).collect();
+    let names: Vec<String> = (0..za.len())
+        .filter_map(|i| {
+            za.by_index(i)
+                .ok()
+                .and_then(|e| e.name().ok().map(|n| n.into_owned()))
+        })
+        .collect();
     assert!(names.iter().any(|n| n == "a.txt"), "{names:?}");
     assert!(names.iter().any(|n| n == "docs/inner.txt"), "{names:?}");
     assert!(names.iter().any(|n| n == "docs/"), "{names:?}");
     use std::io::Read as _;
     let mut s = String::new();
-    za.by_name("docs/inner.txt").unwrap().read_to_string(&mut s).unwrap();
+    za.by_name("docs/inner.txt")
+        .unwrap()
+        .read_to_string(&mut s)
+        .unwrap();
     assert_eq!(s, "inner-data");
 }

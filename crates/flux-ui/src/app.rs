@@ -27,12 +27,26 @@ pub struct Clipboard {
 
 pub enum Dialog {
     None,
-    Rename { src: PathBuf, input: String },
-    NewFolder { input: String },
-    NewFile { input: String },
-    ConfirmPermanentDelete { items: Vec<PathBuf> },
-    ConfirmTrashUnsupported { items: Vec<PathBuf> },
-    Conflict { query: ConflictQuery, apply_all: bool },
+    Rename {
+        src: PathBuf,
+        input: String,
+    },
+    NewFolder {
+        input: String,
+    },
+    NewFile {
+        input: String,
+    },
+    ConfirmPermanentDelete {
+        items: Vec<PathBuf>,
+    },
+    ConfirmTrashUnsupported {
+        items: Vec<PathBuf>,
+    },
+    Conflict {
+        query: ConflictQuery,
+        apply_all: bool,
+    },
     BulkRename(BulkRenameState),
     Properties {
         path: PathBuf,
@@ -154,22 +168,70 @@ pub struct Command {
 }
 
 pub const COMMANDS: &[Command] = &[
-    Command { name: "Go to Home", id: "go_home" },
-    Command { name: "New Tab", id: "new_tab" },
-    Command { name: "Close Tab", id: "close_tab" },
-    Command { name: "Toggle Hidden Files", id: "toggle_hidden" },
-    Command { name: "Refresh", id: "refresh" },
-    Command { name: "Focus Address Bar", id: "focus_address" },
-    Command { name: "Focus Filter", id: "focus_filter" },
-    Command { name: "New Folder", id: "new_folder" },
-    Command { name: "New File", id: "new_file" },
-    Command { name: "Bulk Rename Selected", id: "bulk_rename" },
-    Command { name: "Duplicate Selected", id: "duplicate" },
-    Command { name: "Copy Path(s)", id: "copy_paths" },
-    Command { name: "Open in Terminal", id: "open_terminal" },
-    Command { name: "Toggle Recursive Search", id: "toggle_search" },
-    Command { name: "Toggle Density", id: "toggle_density" },
-    Command { name: "Toggle Dark/Light", id: "toggle_theme" },
+    Command {
+        name: "Go to Home",
+        id: "go_home",
+    },
+    Command {
+        name: "New Tab",
+        id: "new_tab",
+    },
+    Command {
+        name: "Close Tab",
+        id: "close_tab",
+    },
+    Command {
+        name: "Toggle Hidden Files",
+        id: "toggle_hidden",
+    },
+    Command {
+        name: "Refresh",
+        id: "refresh",
+    },
+    Command {
+        name: "Focus Address Bar",
+        id: "focus_address",
+    },
+    Command {
+        name: "Focus Filter",
+        id: "focus_filter",
+    },
+    Command {
+        name: "New Folder",
+        id: "new_folder",
+    },
+    Command {
+        name: "New File",
+        id: "new_file",
+    },
+    Command {
+        name: "Bulk Rename Selected",
+        id: "bulk_rename",
+    },
+    Command {
+        name: "Duplicate Selected",
+        id: "duplicate",
+    },
+    Command {
+        name: "Copy Path(s)",
+        id: "copy_paths",
+    },
+    Command {
+        name: "Open in Terminal",
+        id: "open_terminal",
+    },
+    Command {
+        name: "Toggle Recursive Search",
+        id: "toggle_search",
+    },
+    Command {
+        name: "Toggle Density",
+        id: "toggle_density",
+    },
+    Command {
+        name: "Toggle Dark/Light",
+        id: "toggle_theme",
+    },
 ];
 
 pub struct FluxApp {
@@ -435,9 +497,10 @@ impl FluxApp {
         let tab = self.current_tab();
         let s = tab.snap.read().unwrap();
         if let Some(row) = tab.sel.focus
-            && let Some(idx) = s.row_index(row) {
-                return s.entry_path(idx);
-            }
+            && let Some(idx) = s.row_index(row)
+        {
+            return s.entry_path(idx);
+        }
         tab.sel.ids.iter().next().and_then(|&i| s.entry_path(i))
     }
 
@@ -480,7 +543,11 @@ impl FluxApp {
         }
         let (snap, path, deferred) = {
             let t = self.current_tab();
-            (t.snap.clone(), t.snap.read().unwrap().path.clone(), t.deferred_load)
+            (
+                t.snap.clone(),
+                t.snap.read().unwrap().path.clone(),
+                t.deferred_load,
+            )
         };
         if deferred {
             self.current_tab_mut().deferred_load = false;
@@ -497,7 +564,11 @@ impl FluxApp {
         self.active = idx;
         let (snap, path, deferred) = {
             let t = self.current_tab();
-            (t.snap.clone(), t.snap.read().unwrap().path.clone(), t.deferred_load)
+            (
+                t.snap.clone(),
+                t.snap.read().unwrap().path.clone(),
+                t.deferred_load,
+            )
         };
         if deferred {
             self.current_tab_mut().deferred_load = false;
@@ -655,7 +726,9 @@ impl FluxApp {
         let items: Vec<PathBuf> = drag
             .items
             .into_iter()
-            .filter(|p| p.as_path() != target_dir.as_path() && p.parent() != Some(target_dir.as_path()))
+            .filter(|p| {
+                p.as_path() != target_dir.as_path() && p.parent() != Some(target_dir.as_path())
+            })
             .collect();
         if items.is_empty() {
             return;
@@ -693,18 +766,17 @@ impl FluxApp {
         if items.is_empty() {
             return;
         }
-        self.ops
-            .submit(OpKind::Trash { items }, flux_operations::ConflictPolicy::Ask);
+        self.ops.submit(
+            OpKind::Trash { items },
+            flux_operations::ConflictPolicy::Ask,
+        );
     }
 
     /// Compress selected items to "<name>.zip" in their parent dir
     /// (multi-select → "Archive.zip"); auto-suffixes when taken.
     pub fn compress_items(&mut self, items: Vec<PathBuf>) {
         let Some(first) = items.first() else { return };
-        let parent = first
-            .parent()
-            .map(|p| p.to_path_buf())
-            .unwrap_or_default();
+        let parent = first.parent().map(|p| p.to_path_buf()).unwrap_or_default();
         let stem = if items.len() == 1 {
             first
                 .file_stem()
@@ -802,10 +874,11 @@ impl FluxApp {
             if let ComputeEvent::ViewReady { gen_id } = ev {
                 for tab in &mut self.tabs {
                     if tab.gen_id == gen_id
-                        && let Some(names) = tab.pending_reselect.take() {
-                            let s = tab.snap.read().unwrap();
-                            tab.sel.reselect_names(&s, &names);
-                        }
+                        && let Some(names) = tab.pending_reselect.take()
+                    {
+                        let s = tab.snap.read().unwrap();
+                        tab.sel.reselect_names(&s, &names);
+                    }
                 }
                 ctx.request_repaint();
             }
@@ -877,10 +950,12 @@ impl FluxApp {
         }
         // Deferred bulk-rename preview recompute (debounced).
         if let Dialog::BulkRename(br) = &mut self.dialog
-            && br.dirty && br.last_edit.elapsed() > Duration::from_millis(250) {
-                br.recompute();
-                ctx.request_repaint();
-            }
+            && br.dirty
+            && br.last_edit.elapsed() > Duration::from_millis(250)
+        {
+            br.recompute();
+            ctx.request_repaint();
+        }
         // GC finished ops once a minute.
         if self.last_gc.elapsed() > Duration::from_secs(60) {
             self.last_gc = Instant::now();

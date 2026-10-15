@@ -67,10 +67,8 @@ pub fn show(app: &mut FluxApp, ctx: &egui::Context) {
                         .font(egui::TextStyle::Heading),
                 );
                 resp.request_focus();
-                let enter = resp.lost_focus()
-                    && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                let (primary, cancel) =
-                    footer(ui, "Rename", !input.trim().is_empty());
+                let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                let (primary, cancel) = footer(ui, "Rename", !input.trim().is_empty());
                 if primary || enter {
                     do_rename = true;
                 }
@@ -110,10 +108,8 @@ pub fn show(app: &mut FluxApp, ctx: &egui::Context) {
                         .hint_text("Folder name"),
                 );
                 r.request_focus();
-                let enter = r.lost_focus()
-                    && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                let (primary, cancel) =
-                    footer(ui, "Create", !input.trim().is_empty());
+                let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                let (primary, cancel) = footer(ui, "Create", !input.trim().is_empty());
                 ok = primary || enter;
                 if cancel {
                     close = true;
@@ -146,10 +142,8 @@ pub fn show(app: &mut FluxApp, ctx: &egui::Context) {
                         .hint_text("File name"),
                 );
                 r.request_focus();
-                let enter = r.lost_focus()
-                    && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                let (primary, cancel) =
-                    footer(ui, "Create", !input.trim().is_empty());
+                let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                let (primary, cancel) = footer(ui, "Create", !input.trim().is_empty());
                 ok = primary || enter;
                 if cancel {
                     close = true;
@@ -168,37 +162,39 @@ pub fn show(app: &mut FluxApp, ctx: &egui::Context) {
         Dialog::ConfirmPermanentDelete { items } => {
             let n = items.len();
             let mut confirm = false;
-            card("Delete Permanently").default_width(380.0).show(ctx, |ui| {
-                heading(ui, "Delete Permanently?");
-                ui.add_space(4.0);
-                ui.label(format!(
-                    "Permanently delete {n} item(s)? This cannot be undone."
-                ));
-                ui.add_space(8.0);
-                ui.horizontal(|ui| {
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui
-                            .add(
-                                egui::Button::new(
-                                    egui::RichText::new("Delete")
-                                        .color(egui::Color32::WHITE)
-                                        .size(14.0),
+            card("Delete Permanently")
+                .default_width(380.0)
+                .show(ctx, |ui| {
+                    heading(ui, "Delete Permanently?");
+                    ui.add_space(4.0);
+                    ui.label(format!(
+                        "Permanently delete {n} item(s)? This cannot be undone."
+                    ));
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui
+                                .add(
+                                    egui::Button::new(
+                                        egui::RichText::new("Delete")
+                                            .color(egui::Color32::WHITE)
+                                            .size(14.0),
+                                    )
+                                    .fill(ui.visuals().error_fg_color)
+                                    .corner_radius(egui::CornerRadius::same(7))
+                                    .min_size(egui::vec2(88.0, 32.0)),
                                 )
-                                .fill(ui.visuals().error_fg_color)
-                                .corner_radius(egui::CornerRadius::same(7))
-                                .min_size(egui::vec2(88.0, 32.0)),
-                            )
-                            .clicked()
-                        {
-                            confirm = true;
-                        }
-                        ui.add_space(4.0);
-                        if crate::menu::ghost_button(ui, "Cancel").clicked() {
-                            close = true;
-                        }
+                                .clicked()
+                            {
+                                confirm = true;
+                            }
+                            ui.add_space(4.0);
+                            if crate::menu::ghost_button(ui, "Cancel").clicked() {
+                                close = true;
+                            }
+                        });
                     });
                 });
-            });
             if confirm {
                 let items = std::mem::take(items);
                 app.ops.submit(
@@ -211,37 +207,39 @@ pub fn show(app: &mut FluxApp, ctx: &egui::Context) {
         Dialog::ConfirmTrashUnsupported { items } => {
             let n = items.len();
             let mut yes = false;
-            card("Trash unavailable").default_width(380.0).show(ctx, |ui| {
-                heading(ui, "Trash Unavailable");
-                ui.add_space(4.0);
-                ui.label(format!(
-                    "Trash is unavailable for {n} item(s). Permanently delete them instead?"
-                ));
-                ui.add_space(8.0);
-                ui.horizontal(|ui| {
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui
-                            .add(
-                                egui::Button::new(
-                                    egui::RichText::new("Delete permanently")
-                                        .color(egui::Color32::WHITE)
-                                        .size(14.0),
+            card("Trash unavailable")
+                .default_width(380.0)
+                .show(ctx, |ui| {
+                    heading(ui, "Trash Unavailable");
+                    ui.add_space(4.0);
+                    ui.label(format!(
+                        "Trash is unavailable for {n} item(s). Permanently delete them instead?"
+                    ));
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui
+                                .add(
+                                    egui::Button::new(
+                                        egui::RichText::new("Delete permanently")
+                                            .color(egui::Color32::WHITE)
+                                            .size(14.0),
+                                    )
+                                    .fill(ui.visuals().error_fg_color)
+                                    .corner_radius(egui::CornerRadius::same(7))
+                                    .min_size(egui::vec2(88.0, 32.0)),
                                 )
-                                .fill(ui.visuals().error_fg_color)
-                                .corner_radius(egui::CornerRadius::same(7))
-                                .min_size(egui::vec2(88.0, 32.0)),
-                            )
-                            .clicked()
-                        {
-                            yes = true;
-                        }
-                        ui.add_space(4.0);
-                        if crate::menu::ghost_button(ui, "Cancel").clicked() {
-                            close = true;
-                        }
+                                .clicked()
+                            {
+                                yes = true;
+                            }
+                            ui.add_space(4.0);
+                            if crate::menu::ghost_button(ui, "Cancel").clicked() {
+                                close = true;
+                            }
+                        });
                     });
                 });
-            });
             if yes {
                 let items = std::mem::take(items);
                 app.ops.submit(
@@ -260,37 +258,37 @@ pub fn show(app: &mut FluxApp, ctx: &egui::Context) {
             if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
                 decision = Some(ConflictAction::CancelOp);
             }
-            card("Item already exists").default_width(420.0).show(ctx, |ui| {
-                heading(ui, "Item Already Exists");
-                ui.add_space(4.0);
-                ui.label(
-                    egui::RichText::new(dst.display().to_string()).strong(),
-                );
-                ui.label(
-                    egui::RichText::new(format!("From: {}", src.display()))
-                        .small()
-                        .weak(),
-                );
-                ui.add_space(4.0);
-                ui.checkbox(apply_all, "Apply to all remaining conflicts");
-                ui.add_space(4.0);
-                ui.horizontal(|ui| {
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if crate::menu::primary_button(ui, "Replace").clicked() {
-                            decision = Some(ConflictAction::Overwrite);
-                        }
-                        if crate::menu::ghost_button(ui, "Keep Both").clicked() {
-                            decision = Some(ConflictAction::KeepBoth);
-                        }
-                        if crate::menu::ghost_button(ui, "Skip").clicked() {
-                            decision = Some(ConflictAction::Skip);
-                        }
-                        if crate::menu::ghost_button(ui, "Cancel").clicked() {
-                            decision = Some(ConflictAction::CancelOp);
-                        }
+            card("Item already exists")
+                .default_width(420.0)
+                .show(ctx, |ui| {
+                    heading(ui, "Item Already Exists");
+                    ui.add_space(4.0);
+                    ui.label(egui::RichText::new(dst.display().to_string()).strong());
+                    ui.label(
+                        egui::RichText::new(format!("From: {}", src.display()))
+                            .small()
+                            .weak(),
+                    );
+                    ui.add_space(4.0);
+                    ui.checkbox(apply_all, "Apply to all remaining conflicts");
+                    ui.add_space(4.0);
+                    ui.horizontal(|ui| {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if crate::menu::primary_button(ui, "Replace").clicked() {
+                                decision = Some(ConflictAction::Overwrite);
+                            }
+                            if crate::menu::ghost_button(ui, "Keep Both").clicked() {
+                                decision = Some(ConflictAction::KeepBoth);
+                            }
+                            if crate::menu::ghost_button(ui, "Skip").clicked() {
+                                decision = Some(ConflictAction::Skip);
+                            }
+                            if crate::menu::ghost_button(ui, "Cancel").clicked() {
+                                decision = Some(ConflictAction::CancelOp);
+                            }
+                        });
                     });
                 });
-            });
             if let Some(action) = decision {
                 app.ops.answer_conflict(
                     qid,
@@ -307,38 +305,43 @@ pub fn show(app: &mut FluxApp, ctx: &egui::Context) {
         }
         Dialog::Properties { path, meta } => {
             let p = path.clone();
-            card("Properties").resizable(true).min_size([340.0, 0.0]).show(ctx, |ui| {
-                heading(ui, "Properties");
-                ui.add_space(6.0);
-                properties_body(ui, &p, meta, ctx);
-                let (_p, cancel) = footer(ui, "Close", true);
-                if _p || cancel {
-                    close = true;
-                }
-            });
+            card("Properties")
+                .resizable(true)
+                .min_size([340.0, 0.0])
+                .show(ctx, |ui| {
+                    heading(ui, "Properties");
+                    ui.add_space(6.0);
+                    properties_body(ui, &p, meta, ctx);
+                    let (_p, cancel) = footer(ui, "Close", true);
+                    if _p || cancel {
+                        close = true;
+                    }
+                });
         }
         Dialog::About => {
-            card("About Flux Files").default_width(300.0).show(ctx, |ui| {
-                heading(ui, "Flux Files");
-                ui.label(
-                    egui::RichText::new("A fast native file explorer")
-                        .weak()
-                        .small(),
-                );
-                ui.add_space(4.0);
-                ui.weak("Built with Rust + egui.");
-                let (_p, cancel) = footer(ui, "Close", true);
-                if _p || cancel {
-                    close = true;
-                }
-            });
+            card("About Flux Files")
+                .default_width(300.0)
+                .show(ctx, |ui| {
+                    heading(ui, "Flux Files");
+                    ui.label(
+                        egui::RichText::new("A fast native file explorer")
+                            .weak()
+                            .small(),
+                    );
+                    ui.add_space(4.0);
+                    ui.weak("Built with Rust + egui.");
+                    let (_p, cancel) = footer(ui, "Close", true);
+                    if _p || cancel {
+                        close = true;
+                    }
+                });
         }
     }
     // Escape dismisses any open dialog.
-    if !close && !matches!(dialog, Dialog::None)
-        && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-            close = true;
-        }
+    if !close && !matches!(dialog, Dialog::None) && ctx.input(|i| i.key_pressed(egui::Key::Escape))
+    {
+        close = true;
+    }
     if !close {
         app.dialog = dialog;
     }
@@ -346,8 +349,7 @@ pub fn show(app: &mut FluxApp, ctx: &egui::Context) {
 
 /// Async slot for the Properties dialog's metadata — `None` while the
 /// background stat is in flight.
-pub type PropsMeta =
-    std::sync::Arc<std::sync::Mutex<Option<Result<std::fs::Metadata, String>>>>;
+pub type PropsMeta = std::sync::Arc<std::sync::Mutex<Option<Result<std::fs::Metadata, String>>>>;
 
 fn properties_body(
     ui: &mut egui::Ui,
@@ -398,7 +400,11 @@ fn properties_body(
                 ui.label(crate::format::format_mtime(md.modified().ok()));
                 ui.end_row();
                 ui.label("Read-only");
-                ui.label(if md.permissions().readonly() { "Yes" } else { "No" });
+                ui.label(if md.permissions().readonly() {
+                    "Yes"
+                } else {
+                    "No"
+                });
                 ui.end_row();
             }
             Some(Err(e)) => {
@@ -416,7 +422,9 @@ const PREVIEW_CAP: usize = 2_000;
 fn chip(ui: &mut egui::Ui, label: &str, on: bool) -> egui::Response {
     let accent = ui.visuals().selection.stroke.color;
     let mut b = egui::Button::new(if on {
-        egui::RichText::new(label).color(egui::Color32::WHITE).size(13.0)
+        egui::RichText::new(label)
+            .color(egui::Color32::WHITE)
+            .size(13.0)
     } else {
         egui::RichText::new(label).size(13.0)
     })
@@ -428,7 +436,12 @@ fn chip(ui: &mut egui::Ui, label: &str, on: bool) -> egui::Response {
     ui.add(b)
 }
 
-fn bulk_rename_dialog(app: &mut FluxApp, br: &mut BulkRenameState, ctx: &egui::Context, close: &mut bool) {
+fn bulk_rename_dialog(
+    app: &mut FluxApp,
+    br: &mut BulkRenameState,
+    ctx: &egui::Context,
+    close: &mut bool,
+) {
     if br.dirty && br.plan.is_empty() {
         br.recompute();
     }
@@ -446,7 +459,9 @@ fn bulk_rename_dialog(app: &mut FluxApp, br: &mut BulkRenameState, ctx: &egui::C
             // Core flow: find → replace → preview → rename.
             ui.label(egui::RichText::new("Find").weak().small());
             let find_r = ui.add(
-                egui::TextEdit::singleline(&mut br.find).desired_width(f32::INFINITY).margin(egui::Margin::symmetric(10, 8)),
+                egui::TextEdit::singleline(&mut br.find)
+                    .desired_width(f32::INFINITY)
+                    .margin(egui::Margin::symmetric(10, 8)),
             );
             if find_r.changed() {
                 br.dirty = true;
@@ -455,7 +470,11 @@ fn bulk_rename_dialog(app: &mut FluxApp, br: &mut BulkRenameState, ctx: &egui::C
             ui.add_space(6.0);
             ui.label(egui::RichText::new("Replace with").weak().small());
             if ui
-                .add(egui::TextEdit::singleline(&mut br.replace).desired_width(f32::INFINITY).margin(egui::Margin::symmetric(10, 8)))
+                .add(
+                    egui::TextEdit::singleline(&mut br.replace)
+                        .desired_width(f32::INFINITY)
+                        .margin(egui::Margin::symmetric(10, 8)),
+                )
                 .changed()
             {
                 br.dirty = true;
@@ -484,7 +503,10 @@ fn bulk_rename_dialog(app: &mut FluxApp, br: &mut BulkRenameState, ctx: &egui::C
                         br.dirty = true;
                     }
                     ui.label(egui::RichText::new("Pad").weak().small());
-                    if ui.add(egui::DragValue::new(&mut br.num_pad).range(0..=8)).changed() {
+                    if ui
+                        .add(egui::DragValue::new(&mut br.num_pad).range(0..=8))
+                        .changed()
+                    {
                         br.dirty = true;
                     }
                     if chip(ui, "Number first", br.num_prefix).clicked() {
@@ -524,9 +546,11 @@ fn bulk_rename_dialog(app: &mut FluxApp, br: &mut BulkRenameState, ctx: &egui::C
             ui.add_space(4.0);
 
             // Live preview — the confirmation of what will happen.
-            ui.label(egui::RichText::new(format!("Preview — {n_ready} ready · {n_skip} skipped"))
-                .weak()
-                .small());
+            ui.label(
+                egui::RichText::new(format!("Preview — {n_ready} ready · {n_skip} skipped"))
+                    .weak()
+                    .small(),
+            );
             egui::Frame::group(ui.style()).show(ui, |ui| {
                 egui::ScrollArea::both()
                     .id_salt("bulk_preview")
@@ -582,7 +606,9 @@ fn bulk_rename_dialog(app: &mut FluxApp, br: &mut BulkRenameState, ctx: &egui::C
             ui.horizontal(|ui| {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if n_ready > 0 {
-                        if crate::menu::primary_button(ui, &format!("Rename {n_ready} items")).clicked() {
+                        if crate::menu::primary_button(ui, &format!("Rename {n_ready} items"))
+                            .clicked()
+                        {
                             apply = true;
                         }
                     } else {
@@ -679,7 +705,17 @@ pub fn row_context_menu(app: &mut FluxApp, ui: &mut egui::Ui, items: &[PathBuf])
     }
     m::sep(ui);
     let rename_sc = if single { "F2" } else { "" };
-    if m::item_shortcut(ui, if single { "Rename…" } else { "Rename… (batch)" }, rename_sc).clicked() {
+    if m::item_shortcut(
+        ui,
+        if single {
+            "Rename…"
+        } else {
+            "Rename… (batch)"
+        },
+        rename_sc,
+    )
+    .clicked()
+    {
         ui.close();
         if single {
             if let Some(p) = first.clone() {
@@ -727,16 +763,23 @@ pub fn row_context_menu(app: &mut FluxApp, ui: &mut egui::Ui, items: &[PathBuf])
     if single && m::item(ui, "Copy Name").clicked() {
         ui.close();
         if let Some(p) = first.clone() {
-            app.pending_copy_text =
-                Some(p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
+            app.pending_copy_text = Some(
+                p.file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
+            );
         }
     }
     if single
         && let Some(p) = first.clone()
-            && m::item(ui, "Properties").clicked() {
-                ui.close();
-                app.dialog = Dialog::Properties { path: p, meta: None };
-            }
+        && m::item(ui, "Properties").clicked()
+    {
+        ui.close();
+        app.dialog = Dialog::Properties {
+            path: p,
+            meta: None,
+        };
+    }
 }
 
 /// Context menu for empty space in the file list — actions on the *current*
@@ -747,11 +790,15 @@ pub fn bg_context_menu(app: &mut FluxApp, ui: &mut egui::Ui) {
     m::begin(ui, 200.0);
     if m::item_shortcut(ui, "New Folder…", &format!("Shift+{CMD}+N")).clicked() {
         ui.close();
-        app.dialog = Dialog::NewFolder { input: String::new() };
+        app.dialog = Dialog::NewFolder {
+            input: String::new(),
+        };
     }
     if m::item(ui, "New File…").clicked() {
         ui.close();
-        app.dialog = Dialog::NewFile { input: String::new() };
+        app.dialog = Dialog::NewFile {
+            input: String::new(),
+        };
     }
     let has_clip = !app.clipboard.items.is_empty();
     if m::item_sc_enabled(ui, "Paste", &format!("{CMD}+V"), has_clip).clicked() {

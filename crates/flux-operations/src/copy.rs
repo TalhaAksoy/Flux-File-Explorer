@@ -223,7 +223,10 @@ pub fn discover(c: &CopyCtx<'_>, sources: &[PathBuf]) {
 /// Claim a unique staging path next to `dst` via `create_new` — atomic,
 /// and it can never truncate a leftover `*.fluxpart-*` or a user file.
 fn create_staging(dst: &Path, tag: u64) -> std::io::Result<(PathBuf, fs::File)> {
-    let base = dst.file_name().map(|n| n.to_os_string()).unwrap_or_default();
+    let base = dst
+        .file_name()
+        .map(|n| n.to_os_string())
+        .unwrap_or_default();
     for n in 0..100u32 {
         let mut name = base.clone();
         name.push(format!(".fluxpart-{tag}-{n}"));
@@ -241,7 +244,10 @@ fn create_staging(dst: &Path, tag: u64) -> std::io::Result<(PathBuf, fs::File)> 
 /// replace. Existence-checked; the window before the rename is tiny and
 /// the name is ours to recycle anyway.
 fn unique_sibling(dst: &Path, marker: &str) -> PathBuf {
-    let base = dst.file_name().map(|n| n.to_os_string()).unwrap_or_default();
+    let base = dst
+        .file_name()
+        .map(|n| n.to_os_string())
+        .unwrap_or_default();
     for n in 0..1000u32 {
         let mut name = base.clone();
         name.push(format!("{marker}-{n}"));

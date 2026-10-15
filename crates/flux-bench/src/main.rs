@@ -12,7 +12,7 @@ use std::path::Path;
 use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
-use flux_core::{DirSnapshot, EnumEngine, EnumEvent, ComputeEngine, ComputeEvent};
+use flux_core::{ComputeEngine, ComputeEvent, DirSnapshot, EnumEngine, EnumEvent};
 
 fn main() -> ExitCode {
     let mut args = std::env::args().skip(1);

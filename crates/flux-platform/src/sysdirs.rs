@@ -23,9 +23,11 @@ pub fn known_dirs() -> Vec<(&'static str, PathBuf)> {
         ];
         for (label, p) in candidates {
             if let Some(p) = p
-                && p.exists() && !out.iter().any(|(_, q)| q == &p) {
-                    out.push((label, p));
-                }
+                && p.exists()
+                && !out.iter().any(|(_, q)| q == &p)
+            {
+                out.push((label, p));
+            }
         }
     }
     if out.is_empty() {
@@ -33,11 +35,14 @@ pub fn known_dirs() -> Vec<(&'static str, PathBuf)> {
         for label in ["Desktop", "Documents", "Downloads"] {
             let p = h.join(label);
             if p.exists() {
-                out.push((match label {
-                    "Desktop" => "Desktop",
-                    "Documents" => "Documents",
-                    _ => "Downloads",
-                }, p));
+                out.push((
+                    match label {
+                        "Desktop" => "Desktop",
+                        "Documents" => "Documents",
+                        _ => "Downloads",
+                    },
+                    p,
+                ));
             }
         }
         out.push(("Home", h));

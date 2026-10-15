@@ -59,12 +59,13 @@ impl FsWatcher {
         let watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
             if let Ok(ev) = res
                 && is_content_change(&ev.kind)
-                && let Some(p) = ev.paths.first() {
-                    let _ = tx.send(p.clone());
-                    if let Some(w) = wake2.lock().unwrap().as_ref() {
-                        w();
-                    }
+                && let Some(p) = ev.paths.first()
+            {
+                let _ = tx.send(p.clone());
+                if let Some(w) = wake2.lock().unwrap().as_ref() {
+                    w();
                 }
+            }
         });
         Self {
             watcher: watcher.ok(),
@@ -100,9 +101,10 @@ impl FsWatcher {
         }
         self.unwatch();
         if let Some(w) = self.watcher.as_mut()
-            && w.watch(dir, RecursiveMode::NonRecursive).is_ok() {
-                self.watching = Some(dir.to_path_buf());
-            }
+            && w.watch(dir, RecursiveMode::NonRecursive).is_ok()
+        {
+            self.watching = Some(dir.to_path_buf());
+        }
     }
 
     pub fn unwatch(&mut self) {

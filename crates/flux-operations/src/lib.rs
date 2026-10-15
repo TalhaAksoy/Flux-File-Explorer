@@ -15,4 +15,4 @@ pub mod rename;
 pub use conflict::{ConflictDecision, ConflictPolicy, ConflictQuery};
 pub use engine::{OpEngine, OpEvent, OpHandle, OpId, OpJob, OpKind};
 pub use progress::{OpProgress, OpState};
-pub use rename::{RenameAction, RenameStatus, RenameRule, plan_renames};
+pub use rename::{RenameAction, RenameRule, RenameStatus, plan_renames};

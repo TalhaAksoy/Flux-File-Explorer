@@ -32,10 +32,7 @@ pub fn paint_glyph(p: &egui::Painter, rect: Rect, g: Glyph, color: Color32) {
             // Arrowhead: two strokes leaning back from the tip.
             for dy in [-1.0f32, 1.0] {
                 p.line_segment(
-                    [
-                        tip,
-                        Pos2::new(tip.x - dir * r * 0.55, tip.y + dy * r * 0.5),
-                    ],
+                    [tip, Pos2::new(tip.x - dir * r * 0.55, tip.y + dy * r * 0.5)],
                     st,
                 );
             }
@@ -45,10 +42,7 @@ pub fn paint_glyph(p: &egui::Painter, rect: Rect, g: Glyph, color: Color32) {
             let tail = Pos2::new(c.x, c.y + r * 0.72);
             p.line_segment([tail, tip], st);
             for dx in [-1.0f32, 1.0] {
-                p.line_segment(
-                    [tip, Pos2::new(tip.x + dx * r * 0.5, tip.y + r * 0.55)],
-                    st,
-                );
+                p.line_segment([tip, Pos2::new(tip.x + dx * r * 0.5, tip.y + r * 0.55)], st);
             }
         }
         Glyph::Refresh => {
@@ -69,13 +63,7 @@ pub fn paint_glyph(p: &egui::Painter, rect: Rect, g: Glyph, color: Color32) {
             };
             let nrm = Vec2::new(tan.y, -tan.x);
             for s in [-1.0f32, 1.0] {
-                p.line_segment(
-                    [
-                        tip,
-                        tip - tan * r * 0.5 + nrm * s * r * 0.32,
-                    ],
-                    st,
-                );
+                p.line_segment([tip, tip - tan * r * 0.5 + nrm * s * r * 0.32], st);
             }
         }
         Glyph::Search => {
@@ -87,17 +75,11 @@ pub fn paint_glyph(p: &egui::Painter, rect: Rect, g: Glyph, color: Color32) {
         }
         Glyph::Plus => {
             p.line_segment(
-                [
-                    Pos2::new(c.x - r * 0.6, c.y),
-                    Pos2::new(c.x + r * 0.6, c.y),
-                ],
+                [Pos2::new(c.x - r * 0.6, c.y), Pos2::new(c.x + r * 0.6, c.y)],
                 st,
             );
             p.line_segment(
-                [
-                    Pos2::new(c.x, c.y - r * 0.6),
-                    Pos2::new(c.x, c.y + r * 0.6),
-                ],
+                [Pos2::new(c.x, c.y - r * 0.6), Pos2::new(c.x, c.y + r * 0.6)],
                 st,
             );
         }
@@ -114,10 +96,7 @@ pub fn paint_glyph(p: &egui::Painter, rect: Rect, g: Glyph, color: Color32) {
         }
         Glyph::Disk => {
             // Drive: wide rounded body + slot line + activity dot.
-            let body = Rect::from_center_size(
-                c,
-                Vec2::new(r * 1.5, r * 0.9),
-            );
+            let body = Rect::from_center_size(c, Vec2::new(r * 1.5, r * 0.9));
             p.rect_filled(body, CornerRadius::same(2), color.gamma_multiply(0.25));
             p.rect_stroke(body, CornerRadius::same(2), st, StrokeKind::Inside);
             p.line_segment(
@@ -146,17 +125,18 @@ pub fn icon_row(
 ) -> egui::Response {
     let h = ui.spacing().interact_size.y;
     let w = ui.available_width();
-    let (rect, resp) =
-        ui.allocate_exact_size(Vec2::new(w, h), egui::Sense::click());
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(w, h), egui::Sense::click());
     let pal = crate::theme::Palette::of(&ui.style().visuals);
     let hovered = resp.hovered() && !selected;
     // Pill insets from the panel edge — the fill breathes around the
     // row content rather than hugging the sidebar walls.
     let pill = rect.shrink2(Vec2::new(4.0, 2.0));
     if selected {
-        ui.painter().rect_filled(pill, CornerRadius::same(7), pal.surface_selected);
+        ui.painter()
+            .rect_filled(pill, CornerRadius::same(7), pal.surface_selected);
     } else if hovered {
-        ui.painter().rect_filled(pill, CornerRadius::same(7), pal.surface_hover);
+        ui.painter()
+            .rect_filled(pill, CornerRadius::same(7), pal.surface_hover);
     }
     let text_col = if selected {
         pal.text_primary
@@ -167,7 +147,11 @@ pub fn icon_row(
         Pos2::new(rect.left() + h * 0.62, rect.center().y),
         Vec2::splat(h * 0.56),
     );
-    paint(ui.painter(), ir, if selected { pal.text_primary } else { text_col });
+    paint(
+        ui.painter(),
+        ir,
+        if selected { pal.text_primary } else { text_col },
+    );
     ui.painter().text(
         Pos2::new(rect.left() + h * 1.1, rect.center().y),
         egui::Align2::LEFT_CENTER,
@@ -204,12 +188,7 @@ pub fn paint_triangle(p: &egui::Painter, rect: Rect, up: bool, color: Color32) {
 
 /// A square toolbar button showing a painted glyph; honors hover/disabled
 /// styling through the widget visuals so it looks native to the theme.
-pub fn icon_button(
-    ui: &mut egui::Ui,
-    g: Glyph,
-    tip: &str,
-    enabled: bool,
-) -> egui::Response {
+pub fn icon_button(ui: &mut egui::Ui, g: Glyph, tip: &str, enabled: bool) -> egui::Response {
     let size = ui.spacing().interact_size.y;
     let sense = if enabled {
         egui::Sense::click()
@@ -244,8 +223,7 @@ pub fn icon_button(
 /// Toggle-style icon button — glyph turns accent + bg shows when `on`.
 pub fn icon_toggle(ui: &mut egui::Ui, g: Glyph, tip: &str, on: bool) -> egui::Response {
     let size = ui.spacing().interact_size.y;
-    let (rect, resp) =
-        ui.allocate_exact_size(Vec2::splat(size), egui::Sense::click());
+    let (rect, resp) = ui.allocate_exact_size(Vec2::splat(size), egui::Sense::click());
     let resp = resp.on_hover_text(tip);
     let vis = ui.style().interact(&resp);
     let accent = ui.visuals().selection.stroke.color;
@@ -274,11 +252,7 @@ pub fn icon_toggle(ui: &mut egui::Ui, g: Glyph, tip: &str, on: bool) -> egui::Re
 /// Bright drop-target glow: translucent accent fill + crisp accent stroke.
 /// Painted on whatever layer the caller's painter is on.
 pub fn glow_drop_target(p: &egui::Painter, rect: Rect, accent: Color32) {
-    p.rect_filled(
-        rect,
-        CornerRadius::same(3),
-        accent.gamma_multiply(0.22),
-    );
+    p.rect_filled(rect, CornerRadius::same(3), accent.gamma_multiply(0.22));
     p.rect_stroke(
         rect,
         CornerRadius::same(3),

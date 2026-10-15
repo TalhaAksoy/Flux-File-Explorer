@@ -3,7 +3,6 @@
 
 use std::path::PathBuf;
 
-
 use crate::app::FluxApp;
 use crate::format::{format_count, format_size};
 use crate::glyphs;
@@ -41,14 +40,16 @@ pub struct ChromeAction {
 
 /// During a drag, mark `resp` as a drop target for `dir` when hovered and
 /// paint a highlight.
-fn drop_target(app: &FluxApp, ui: &egui::Ui, resp: &egui::Response, dir: &std::path::Path, act: &mut ChromeAction) {
+fn drop_target(
+    app: &FluxApp,
+    ui: &egui::Ui,
+    resp: &egui::Response,
+    dir: &std::path::Path,
+    act: &mut ChromeAction,
+) {
     if app.dragging.is_some() && resp.hovered() {
         act.drop_target = Some(dir.to_path_buf());
-        glyphs::glow_drop_target(
-            ui.painter(),
-            resp.rect,
-            ui.visuals().selection.stroke.color,
-        );
+        glyphs::glow_drop_target(ui.painter(), resp.rect, ui.visuals().selection.stroke.color);
     }
 }
 
@@ -71,7 +72,8 @@ pub fn toolbar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
         if glyphs::icon_button(ui, glyphs::Glyph::Back, "Back (Alt+Left)", can_back).clicked() {
             act.back = true;
         }
-        if glyphs::icon_button(ui, glyphs::Glyph::Forward, "Forward (Alt+Right)", can_fwd).clicked() {
+        if glyphs::icon_button(ui, glyphs::Glyph::Forward, "Forward (Alt+Right)", can_fwd).clicked()
+        {
             act.forward = true;
         }
         if glyphs::icon_button(ui, glyphs::Glyph::Up, "Up (Backspace)", true).clicked() {
@@ -138,8 +140,7 @@ pub fn toolbar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
                                     + 14.0,
                                 26.0,
                             );
-                            let (rect, resp) =
-                                ui.allocate_exact_size(size, egui::Sense::click());
+                            let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
                             if resp.hovered() {
                                 ui.painter().rect_filled(
                                     rect,
@@ -152,7 +153,11 @@ pub fn toolbar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
                                 egui::Align2::CENTER_CENTER,
                                 &label,
                                 egui::FontId::proportional(14.0),
-                                if last { pal.text_primary } else { pal.text_secondary },
+                                if last {
+                                    pal.text_primary
+                                } else {
+                                    pal.text_secondary
+                                },
                             );
                             drop_target(app, ui, &resp, &c, act);
                             if resp.clicked() {
@@ -160,10 +165,7 @@ pub fn toolbar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
                             }
                             if !last {
                                 ui.painter().text(
-                                    egui::pos2(
-                                        rect.right() + 7.0,
-                                        rect.center().y,
-                                    ),
+                                    egui::pos2(rect.right() + 7.0, rect.center().y),
                                     egui::Align2::CENTER_CENTER,
                                     "›",
                                     egui::FontId::proportional(13.0),
@@ -175,7 +177,14 @@ pub fn toolbar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
                     });
                 });
             // Click the breadcrumb area to edit the path directly.
-            if ui.interact(ui.max_rect(), egui::Id::new("crumb_edit"), egui::Sense::click()).clicked() {
+            if ui
+                .interact(
+                    ui.max_rect(),
+                    egui::Id::new("crumb_edit"),
+                    egui::Sense::click(),
+                )
+                .clicked()
+            {
                 app.address_edit = Some(path.display().to_string());
                 app.focus_address = true;
             }
@@ -227,123 +236,127 @@ pub fn sidebar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
     ui.add_space(6.0);
     let pal = crate::theme::Palette::of(&ui.style().visuals);
     let current = app.current_path();
-    let folder_icon =
-        |p: &egui::Painter, r: egui::Rect, _c: egui::Color32| {
-            crate::view::paint_entry_icon(p, r, flux_core::EntryKind::Dir, &pal)
-        };
+    let folder_icon = |p: &egui::Painter, r: egui::Rect, _c: egui::Color32| {
+        crate::view::paint_entry_icon(p, r, flux_core::EntryKind::Dir, &pal)
+    };
     let section = |ui: &mut egui::Ui, label: &str| {
         ui.add_space(8.0);
-        ui.label(
-            egui::RichText::new(label)
-                .color(pal.text_muted)
-                .size(11.0),
-        );
+        ui.label(egui::RichText::new(label).color(pal.text_muted).size(11.0));
     };
-    egui::ScrollArea::vertical().id_salt("sidebar").show(ui, |ui| {
-        section(ui, "Places");
-        for (label, path) in app.known.clone() {
-            let resp = glyphs::icon_row(ui, folder_icon, label, path == current);
-            resp.context_menu(|ui| {
-                if ui.button("Open").clicked() {
-                    act.navigate = Some(path.clone());
-                    ui.close();
-                }
-                if ui.button("Open in New Tab").clicked() {
+    egui::ScrollArea::vertical()
+        .id_salt("sidebar")
+        .show(ui, |ui| {
+            section(ui, "Places");
+            for (label, path) in app.known.clone() {
+                let resp = glyphs::icon_row(ui, folder_icon, label, path == current);
+                resp.context_menu(|ui| {
+                    if ui.button("Open").clicked() {
+                        act.navigate = Some(path.clone());
+                        ui.close();
+                    }
+                    if ui.button("Open in New Tab").clicked() {
+                        act.new_tab_at = Some(path.clone());
+                        ui.close();
+                    }
+                });
+                drop_target(app, ui, &resp, &path, act);
+                if resp.middle_clicked() {
                     act.new_tab_at = Some(path.clone());
-                    ui.close();
-                }
-            });
-            drop_target(app, ui, &resp, &path, act);
-            if resp.middle_clicked() {
-                act.new_tab_at = Some(path.clone());
-            }
-            if resp.clicked() {
-                act.navigate = Some(path);
-            }
-        }
-        if !app.settings.recents.is_empty() {
-            section(ui, "Recent");
-            for p in app.settings.recents.iter().take(6).cloned().collect::<Vec<_>>() {
-                let label = p
-                    .file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| p.display().to_string());
-                let resp = glyphs::icon_row(ui, folder_icon, &label, p == current)
-                    .on_hover_text(p.display().to_string());
-                resp.context_menu(|ui| {
-                    if ui.button("Open").clicked() {
-                        act.navigate = Some(p.clone());
-                        ui.close();
-                    }
-                    if ui.button("Open in New Tab").clicked() {
-                        act.new_tab_at = Some(p.clone());
-                        ui.close();
-                    }
-                });
-                drop_target(app, ui, &resp, &p, act);
-                if resp.middle_clicked() {
-                    act.new_tab_at = Some(p.clone());
                 }
                 if resp.clicked() {
-                    act.navigate = Some(p);
+                    act.navigate = Some(path);
                 }
             }
-        }
-        if !app.settings.bookmarks.is_empty() {
-            section(ui, "Bookmarks");
-            let mut unpin: Option<PathBuf> = None;
-            for p in app.settings.bookmarks.clone() {
-                let label = p
-                    .file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| p.display().to_string());
-                let resp = glyphs::icon_row(ui, folder_icon, &label, p == current)
-                    .on_hover_text(p.display().to_string());
-                resp.context_menu(|ui| {
-                    if ui.button("Open").clicked() {
-                        act.navigate = Some(p.clone());
-                        ui.close();
-                    }
-                    if ui.button("Open in New Tab").clicked() {
+            if !app.settings.recents.is_empty() {
+                section(ui, "Recent");
+                for p in app
+                    .settings
+                    .recents
+                    .iter()
+                    .take(6)
+                    .cloned()
+                    .collect::<Vec<_>>()
+                {
+                    let label = p
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| p.display().to_string());
+                    let resp = glyphs::icon_row(ui, folder_icon, &label, p == current)
+                        .on_hover_text(p.display().to_string());
+                    resp.context_menu(|ui| {
+                        if ui.button("Open").clicked() {
+                            act.navigate = Some(p.clone());
+                            ui.close();
+                        }
+                        if ui.button("Open in New Tab").clicked() {
+                            act.new_tab_at = Some(p.clone());
+                            ui.close();
+                        }
+                    });
+                    drop_target(app, ui, &resp, &p, act);
+                    if resp.middle_clicked() {
                         act.new_tab_at = Some(p.clone());
-                        ui.close();
                     }
-                    ui.separator();
-                    if ui.button("Remove from Sidebar").clicked() {
-                        unpin = Some(p.clone());
-                        ui.close();
+                    if resp.clicked() {
+                        act.navigate = Some(p);
                     }
-                });
-                drop_target(app, ui, &resp, &p, act);
+                }
+            }
+            if !app.settings.bookmarks.is_empty() {
+                section(ui, "Bookmarks");
+                let mut unpin: Option<PathBuf> = None;
+                for p in app.settings.bookmarks.clone() {
+                    let label = p
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| p.display().to_string());
+                    let resp = glyphs::icon_row(ui, folder_icon, &label, p == current)
+                        .on_hover_text(p.display().to_string());
+                    resp.context_menu(|ui| {
+                        if ui.button("Open").clicked() {
+                            act.navigate = Some(p.clone());
+                            ui.close();
+                        }
+                        if ui.button("Open in New Tab").clicked() {
+                            act.new_tab_at = Some(p.clone());
+                            ui.close();
+                        }
+                        ui.separator();
+                        if ui.button("Remove from Sidebar").clicked() {
+                            unpin = Some(p.clone());
+                            ui.close();
+                        }
+                    });
+                    drop_target(app, ui, &resp, &p, act);
+                    if resp.middle_clicked() {
+                        act.new_tab_at = Some(p.clone());
+                    }
+                    if resp.clicked() {
+                        act.navigate = Some(p);
+                    }
+                }
+                if let Some(p) = unpin {
+                    app.unpin_from_sidebar(&p);
+                }
+            }
+            section(ui, "Volumes");
+            for v in app.volumes.clone() {
+                let resp = glyphs::icon_row(
+                    ui,
+                    |p, r, c| glyphs::paint_glyph(p, r, glyphs::Glyph::Disk, c),
+                    &v.label,
+                    v.mount == current,
+                )
+                .on_hover_text(v.mount.display().to_string());
+                drop_target(app, ui, &resp, &v.mount, act);
                 if resp.middle_clicked() {
-                    act.new_tab_at = Some(p.clone());
+                    act.new_tab_at = Some(v.mount.clone());
                 }
                 if resp.clicked() {
-                    act.navigate = Some(p);
+                    act.navigate = Some(v.mount);
                 }
             }
-            if let Some(p) = unpin {
-                app.unpin_from_sidebar(&p);
-            }
-        }
-        section(ui, "Volumes");
-        for v in app.volumes.clone() {
-            let resp = glyphs::icon_row(
-                ui,
-                |p, r, c| glyphs::paint_glyph(p, r, glyphs::Glyph::Disk, c),
-                &v.label,
-                v.mount == current,
-            )
-            .on_hover_text(v.mount.display().to_string());
-            drop_target(app, ui, &resp, &v.mount, act);
-            if resp.middle_clicked() {
-                act.new_tab_at = Some(v.mount.clone());
-            }
-            if resp.clicked() {
-                act.navigate = Some(v.mount);
-            }
-        }
-    });
+        });
 }
 
 /// Tab strip above the table — pill surfaces, not boxed browser tabs.
@@ -383,8 +396,7 @@ pub fn tab_bar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
                 .x;
             let show_x = n > 1;
             let w = text_w + 22.0 + if show_x { 14.0 } else { 0.0 };
-            let (rect, resp) =
-                ui.allocate_exact_size(egui::vec2(w, 26.0), egui::Sense::click());
+            let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, 26.0), egui::Sense::click());
             let fill = if selected {
                 pal.bg_elevated
             } else if resp.hovered() {
@@ -393,14 +405,19 @@ pub fn tab_bar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
                 egui::Color32::TRANSPARENT
             };
             if fill != egui::Color32::TRANSPARENT {
-                ui.painter().rect_filled(rect, egui::CornerRadius::same(7), fill);
+                ui.painter()
+                    .rect_filled(rect, egui::CornerRadius::same(7), fill);
             }
             ui.painter().text(
                 egui::pos2(rect.left() + 11.0, rect.center().y),
                 egui::Align2::LEFT_CENTER,
                 &label,
                 egui::FontId::proportional(13.0),
-                if selected { pal.text_primary } else { pal.text_secondary },
+                if selected {
+                    pal.text_primary
+                } else {
+                    pal.text_secondary
+                },
             );
             // × close — active tab always, others on hover.
             if show_x {
@@ -408,23 +425,14 @@ pub fn tab_bar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
                     egui::pos2(rect.right() - 13.0, rect.center().y),
                     egui::Vec2::splat(14.0),
                 );
-                let xresp = ui.interact(
-                    xr,
-                    egui::Id::new("tabx").with(i),
-                    egui::Sense::click(),
-                );
+                let xresp = ui.interact(xr, egui::Id::new("tabx").with(i), egui::Sense::click());
                 let xcol = if xresp.hovered() {
                     pal.text_primary
                 } else {
                     pal.text_muted
                 };
                 if selected || xresp.hovered() || resp.hovered() {
-                    glyphs::paint_glyph(
-                        ui.painter(),
-                        xr.shrink(3.0),
-                        glyphs::Glyph::Close,
-                        xcol,
-                    );
+                    glyphs::paint_glyph(ui.painter(), xr.shrink(3.0), glyphs::Glyph::Close, xcol);
                 }
                 if xresp.clicked() {
                     close_idx = Some(i);
@@ -467,7 +475,13 @@ pub fn status_bar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) 
                 .ids
                 .iter()
                 .filter_map(|&i| s.entry(i))
-                .map(|e| if e.size == flux_core::UNKNOWN_SIZE { 0 } else { e.size })
+                .map(|e| {
+                    if e.size == flux_core::UNKNOWN_SIZE {
+                        0
+                    } else {
+                        e.size
+                    }
+                })
                 .sum()
         } else {
             0
@@ -510,12 +524,16 @@ pub fn status_bar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) 
         }
         // Toast.
         if let Some((msg, t)) = &app.status_msg
-            && t.elapsed() < std::time::Duration::from_secs(6) {
-                dot(ui);
-                ui.label(
-                    egui::RichText::new(msg).italics().color(pal.text_secondary).size(11.5),
-                );
-            }
+            && t.elapsed() < std::time::Duration::from_secs(6)
+        {
+            dot(ui);
+            ui.label(
+                egui::RichText::new(msg)
+                    .italics()
+                    .color(pal.text_secondary)
+                    .size(11.5),
+            );
+        }
         // Active op progress on the right.
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             for op in app.ops.active_ops() {

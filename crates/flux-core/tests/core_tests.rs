@@ -149,7 +149,10 @@ fn sort_by_modified_desc() {
 fn snapshot_view_is_arrival_order_while_loading() {
     let mut snap = DirSnapshot::new(PathBuf::from("/tmp"));
     snap.begin_load(PathBuf::from("/tmp/x"), 1);
-    let mut b1 = vec![entry("b", EntryKind::File, 1), entry("a", EntryKind::File, 1)];
+    let mut b1 = vec![
+        entry("b", EntryKind::File, 1),
+        entry("a", EntryKind::File, 1),
+    ];
     snap.push_batch(&mut b1);
     assert!(b1.is_empty()); // batch was drained
     assert_eq!(names(&snap), ["b", "a"]);
@@ -187,8 +190,14 @@ fn collect_until_done(engine: &EnumEngine, gen_id: u64, timeout: Duration) -> (u
     while Instant::now() < deadline {
         for ev in engine.drain_events() {
             match ev {
-                EnumEvent::Batch { gen_id: g, total: t } if g == gen_id => total = t,
-                EnumEvent::Finished { gen_id: g, total: t } if g == gen_id => {
+                EnumEvent::Batch {
+                    gen_id: g,
+                    total: t,
+                } if g == gen_id => total = t,
+                EnumEvent::Finished {
+                    gen_id: g,
+                    total: t,
+                } if g == gen_id => {
                     return (t, true);
                 }
                 EnumEvent::Error { gen_id: g, .. } if g == gen_id => return (total, false),
@@ -235,9 +244,13 @@ fn meta_engine_fills_sizes_and_mtimes() {
     let (_t, ok) = collect_until_done(&enum_engine, gen_id, Duration::from_secs(10));
     assert!(ok);
     // Lazy enumeration leaves metadata unknown.
-    assert!(snap.read().unwrap().entries().iter().all(|e| {
-        e.is_dir() || e.size == flux_core::UNKNOWN_SIZE
-    }));
+    assert!(
+        snap.read()
+            .unwrap()
+            .entries()
+            .iter()
+            .all(|e| { e.is_dir() || e.size == flux_core::UNKNOWN_SIZE })
+    );
     meta.fill(&snap, gen_id);
     // Wait for MetaEvent::Finished.
     let deadline = Instant::now() + Duration::from_secs(15);
@@ -252,10 +265,18 @@ fn meta_engine_fills_sizes_and_mtimes() {
     }
     assert!(finished, "meta fill did not finish");
     let s = snap.read().unwrap();
-    let file = s.entries().iter().find(|e| e.name == "f000000.txt").unwrap();
+    let file = s
+        .entries()
+        .iter()
+        .find(|e| e.name == "f000000.txt")
+        .unwrap();
     assert_eq!(file.size, 1);
     assert!(file.mtime.is_some());
-    assert!(s.entries().iter().all(|e| e.is_dir() || e.size != flux_core::UNKNOWN_SIZE));
+    assert!(
+        s.entries()
+            .iter()
+            .all(|e| e.is_dir() || e.size != flux_core::UNKNOWN_SIZE)
+    );
 }
 
 #[test]
@@ -288,7 +309,13 @@ fn sorting_does_not_block_ui_snapshot_reads() {
         s.begin_load(PathBuf::from("/tmp/x"), 7);
         for chunk in 0..25 {
             let mut batch: Vec<DirEntry> = (0..4_000)
-                .map(|i| entry(&format!("f{:06}.txt", chunk * 4_000 + i), EntryKind::File, 1))
+                .map(|i| {
+                    entry(
+                        &format!("f{:06}.txt", chunk * 4_000 + i),
+                        EntryKind::File,
+                        1,
+                    )
+                })
                 .collect();
             s.push_batch(&mut batch);
         }
@@ -355,9 +382,10 @@ fn enumeration_error_surfaces_as_failed_state() {
     while Instant::now() < deadline {
         for ev in engine.drain_events() {
             if let EnumEvent::Error { gen_id: g, .. } = ev
-                && g == gen_id {
-                    failed = true;
-                }
+                && g == gen_id
+            {
+                failed = true;
+            }
         }
         if failed {
             break;

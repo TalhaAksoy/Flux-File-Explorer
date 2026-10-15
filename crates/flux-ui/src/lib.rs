@@ -114,11 +114,37 @@ impl FluxApp {
             )
         });
         let (
-            copy, cut, paste, copy_paths, select_all, new_tab, close_tab,
-            focus_filter, focus_address, refresh_h, hidden_h, new_folder,
-            hidden_mac, rename, refresh_f5, up_bs, back, fwd, up_alt,
-            trash, delete_perm, enter, down, down_s, up_k, up_s, pgdn, pgup,
-            home, end, duplicate,
+            copy,
+            cut,
+            paste,
+            copy_paths,
+            select_all,
+            new_tab,
+            close_tab,
+            focus_filter,
+            focus_address,
+            refresh_h,
+            hidden_h,
+            new_folder,
+            hidden_mac,
+            rename,
+            refresh_f5,
+            up_bs,
+            back,
+            fwd,
+            up_alt,
+            trash,
+            delete_perm,
+            enter,
+            down,
+            down_s,
+            up_k,
+            up_s,
+            pgdn,
+            pgup,
+            home,
+            end,
+            duplicate,
         ) = hits;
 
         // Ctrl+Tab / Ctrl+Shift+Tab — cycle tabs (browser standard).
@@ -325,10 +351,7 @@ impl FluxApp {
                             egui::Vec2::splat(row_h * 0.6),
                             egui::Sense::hover(),
                         );
-                        let key = icon_cache::IconKey::for_entry_path(
-                            kind,
-                            &h.path,
-                        );
+                        let key = icon_cache::IconKey::for_entry_path(kind, &h.path);
                         match icons.peek(&key) {
                             Some(tex) => {
                                 ui.painter().image(
@@ -443,9 +466,10 @@ impl FluxApp {
                     self.palette_sel = self.palette_sel.saturating_sub(1);
                 }
                 if ui.input(|i| i.key_pressed(Key::Enter))
-                    && let Some(c) = matches.get(self.palette_sel) {
-                        run = Some(c.id);
-                    }
+                    && let Some(c) = matches.get(self.palette_sel)
+                {
+                    run = Some(c.id);
+                }
             });
         if let Some(id) = run {
             self.run_command(id, ctx);
@@ -557,9 +581,10 @@ impl eframe::App for FluxApp {
                         s.entry_path(idx)
                     };
                     if let Some(p) = p
-                        && p.is_dir() {
-                            self.new_tab_at(p);
-                        }
+                        && p.is_dir()
+                    {
+                        self.new_tab_at(p);
+                    }
                 }
                 if let Some(spec) = row_act.sort {
                     self.set_sort(spec);
@@ -736,12 +761,7 @@ impl eframe::App for FluxApp {
                                             egui::Color32::WHITE,
                                         );
                                     }
-                                    None => view::paint_entry_icon(
-                                        ui.painter(),
-                                        ir,
-                                        kind,
-                                        &pal,
-                                    ),
+                                    None => view::paint_entry_icon(ui.painter(), ir, kind, &pal),
                                 }
                                 ui.label(&label);
                                 if n > 1 {

@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipWriter};
 
-use crate::copy::{cancelled, note_error, tick_item, CopyCtx};
+use crate::copy::{CopyCtx, cancelled, note_error, tick_item};
 
 const CHUNK: usize = 256 * 1024;
 

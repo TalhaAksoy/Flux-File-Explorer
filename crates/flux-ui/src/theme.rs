@@ -128,15 +128,31 @@ impl Palette {
 /// Fill for the top/bottom chrome — the window tone itself; the toolbar
 /// merges into the title surface rather than floating above the list.
 pub fn chrome_fill(dark: bool) -> Color32 {
-    if dark { Palette::dark() } else { Palette::light() }.bg_window
+    if dark {
+        Palette::dark()
+    } else {
+        Palette::light()
+    }
+    .bg_window
 }
 
 /// Sidebar fill — its own token, a half-step toward content.
 pub fn sidebar_fill(dark: bool) -> Color32 {
-    if dark { Palette::dark() } else { Palette::light() }.bg_sidebar
+    if dark {
+        Palette::dark()
+    } else {
+        Palette::light()
+    }
+    .bg_sidebar
 }
 
-fn widget(corner: u8, weak_bg: Color32, bg: Color32, fg: Color32, stroke: Color32) -> egui::style::WidgetVisuals {
+fn widget(
+    corner: u8,
+    weak_bg: Color32,
+    bg: Color32,
+    fg: Color32,
+    stroke: Color32,
+) -> egui::style::WidgetVisuals {
     egui::style::WidgetVisuals {
         bg_fill: bg,
         weak_bg_fill: weak_bg,
@@ -148,8 +164,16 @@ fn widget(corner: u8, weak_bg: Color32, bg: Color32, fg: Color32, stroke: Color3
 }
 
 pub fn apply_theme(ctx: &egui::Context, dark: bool) {
-    let p = if dark { Palette::dark() } else { Palette::light() };
-    let mut v = if dark { Visuals::dark() } else { Visuals::light() };
+    let p = if dark {
+        Palette::dark()
+    } else {
+        Palette::light()
+    };
+    let mut v = if dark {
+        Visuals::dark()
+    } else {
+        Visuals::light()
+    };
 
     v.panel_fill = p.bg_content;
     v.window_fill = p.bg_elevated;
@@ -167,11 +191,41 @@ pub fn apply_theme(ctx: &egui::Context, dark: bool) {
     // Widget states: resting controls are borderless ghosts; interaction
     // reveals a soft surface fill. Focused fields take an accent edge.
     let ws = &mut v.widgets;
-    ws.inactive = widget(6, Color32::TRANSPARENT, p.field_inset, p.text_primary, p.border_soft);
-    ws.hovered = widget(6, p.surface_hover, p.surface_hover, p.text_primary, p.border_soft);
-    ws.active = widget(6, p.surface_active, p.surface_active, p.text_primary, p.border_soft);
-    ws.open = widget(6, p.surface_hover, p.surface_hover, p.text_primary, p.border_soft);
-    ws.noninteractive = widget(6, Color32::TRANSPARENT, p.field_inset, p.text_primary, Color32::TRANSPARENT);
+    ws.inactive = widget(
+        6,
+        Color32::TRANSPARENT,
+        p.field_inset,
+        p.text_primary,
+        p.border_soft,
+    );
+    ws.hovered = widget(
+        6,
+        p.surface_hover,
+        p.surface_hover,
+        p.text_primary,
+        p.border_soft,
+    );
+    ws.active = widget(
+        6,
+        p.surface_active,
+        p.surface_active,
+        p.text_primary,
+        p.border_soft,
+    );
+    ws.open = widget(
+        6,
+        p.surface_hover,
+        p.surface_hover,
+        p.text_primary,
+        p.border_soft,
+    );
+    ws.noninteractive = widget(
+        6,
+        Color32::TRANSPARENT,
+        p.field_inset,
+        p.text_primary,
+        Color32::TRANSPARENT,
+    );
 
     v.menu_corner_radius = CornerRadius::same(10);
     v.window_corner_radius = CornerRadius::same(12);
@@ -204,7 +258,11 @@ pub fn apply_theme(ctx: &egui::Context, dark: bool) {
     st.insert(egui::TextStyle::Heading, egui::FontId::proportional(16.5));
     st.insert(egui::TextStyle::Monospace, egui::FontId::monospace(12.5));
 
-    let theme = if dark { egui::Theme::Dark } else { egui::Theme::Light };
+    let theme = if dark {
+        egui::Theme::Dark
+    } else {
+        egui::Theme::Light
+    };
     ctx.set_style_of(theme, style);
     ctx.set_theme(theme);
 }
@@ -215,7 +273,8 @@ pub fn load_system_fonts() -> egui::FontDefinitions {
     let mut defs = egui::FontDefinitions::default();
     if let Some(bytes) = system_font_bytes() {
         let data = egui::FontData::from_owned(bytes);
-        defs.font_data.insert("system-ui".into(), std::sync::Arc::new(data));
+        defs.font_data
+            .insert("system-ui".into(), std::sync::Arc::new(data));
         defs.families
             .entry(egui::FontFamily::Proportional)
             .or_default()
@@ -277,8 +336,20 @@ fn scan_font_dirs() -> Option<Vec<u8>> {
     // Style variants make poor UI fonts — "dejavusans" also matches
     // "dejavusans-bold", so name a regular face, not just the family.
     const NON_REGULAR: &[&str] = &[
-        "bold", "italic", "oblique", "light", "medium", "thin", "black",
-        "condensed", "mono", "semibold", "extra", "display", "hairline", "demi",
+        "bold",
+        "italic",
+        "oblique",
+        "light",
+        "medium",
+        "thin",
+        "black",
+        "condensed",
+        "mono",
+        "semibold",
+        "extra",
+        "display",
+        "hairline",
+        "demi",
     ];
     let mut roots = vec![
         std::path::PathBuf::from("/usr/share/fonts"),
@@ -299,13 +370,15 @@ fn scan_font_dirs() -> Option<Vec<u8>> {
                 .unwrap_or_default()
                 .to_string_lossy()
                 .to_lowercase();
-            let variable =
-                stem.contains('[') || stem.ends_with("-vf") || stem.ends_with("_vf");
+            let variable = stem.contains('[') || stem.ends_with("-vf") || stem.ends_with("_vf");
             let styled = NON_REGULAR.iter().any(|s| stem.contains(s));
-            if !variable && !styled && stem.contains(want)
-                && let Ok(b) = std::fs::read(f) {
-                    return Some(b);
-                }
+            if !variable
+                && !styled
+                && stem.contains(want)
+                && let Ok(b) = std::fs::read(f)
+            {
+                return Some(b);
+            }
         }
     }
     None
@@ -316,7 +389,9 @@ fn collect_font_files(dir: &std::path::Path, depth: u8, out: &mut Vec<std::path:
     if depth > 4 {
         return;
     }
-    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return;
+    };
     for e in rd.flatten() {
         let p = e.path();
         if p.is_dir() {

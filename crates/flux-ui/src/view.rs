@@ -40,24 +40,22 @@ pub fn paint_entry_icon(p: &egui::Painter, rect: egui::Rect, kind: EntryKind, pa
             let (w, h) = (rect.width(), rect.height());
             let dark = pal.dir_icon.gamma_multiply(0.62);
             let light = pal.dir_icon;
-            let tab = egui::Rect::from_min_size(
-                rect.min,
-                Vec2::new(w * 0.44, h * 0.34),
-            );
+            let tab = egui::Rect::from_min_size(rect.min, Vec2::new(w * 0.44, h * 0.34));
             p.rect_filled(tab, 1.5, dark);
             let back = egui::Rect::from_min_max(
                 egui::pos2(rect.left() + w * 0.4, rect.top() + h * 0.12),
                 egui::pos2(rect.right(), rect.top() + h * 0.42),
             );
             p.rect_filled(back, 1.5, dark);
-            let body = egui::Rect::from_min_max(
-                egui::pos2(rect.left(), rect.top() + h * 0.32),
-                rect.max,
-            );
+            let body =
+                egui::Rect::from_min_max(egui::pos2(rect.left(), rect.top() + h * 0.32), rect.max);
             p.rect_filled(body, 2.0, light);
             // Sheen line across the front edge.
             p.line_segment(
-                [body.left_top() + Vec2::new(1.0, 0.5), body.right_top() + Vec2::new(-1.0, 0.5)],
+                [
+                    body.left_top() + Vec2::new(1.0, 0.5),
+                    body.right_top() + Vec2::new(-1.0, 0.5),
+                ],
                 (0.8, Color32::WHITE.gamma_multiply(0.35)),
             );
         }
@@ -115,9 +113,10 @@ pub fn file_table(app: &mut FluxApp, ui: &mut egui::Ui) -> RowAction {
     let (view_len, loading, state_label, sort_spec, show_hidden) = {
         let s = snap.read().unwrap();
         let label = match &s.state {
-            flux_core::LoadState::Loading { received } => {
-                Some(format!("Loading… {}", crate::format::format_count(*received)))
-            }
+            flux_core::LoadState::Loading { received } => Some(format!(
+                "Loading… {}",
+                crate::format::format_count(*received)
+            )),
             flux_core::LoadState::Failed(m) => Some(format!("Cannot read folder: {m}")),
             flux_core::LoadState::Ready { .. } if s.view_len() == 0 => {
                 if s.filter.is_some() {
@@ -141,19 +140,20 @@ pub fn file_table(app: &mut FluxApp, ui: &mut egui::Ui) -> RowAction {
     // Empty / failed state occupies the area (except while streaming, where
     // partial rows still show).
     if let Some(msg) = &state_label
-        && (!loading || view_len == 0) {
-            ui.add_space(50.0);
-            ui.vertical_centered(|ui| {
-                if loading {
-                    ui.add(egui::Spinner::new());
-                }
-                ui.label(egui::RichText::new(msg).weak());
-                if msg.starts_with("Cannot read") && ui.button("Retry").clicked() {
-                    action.retry = true;
-                }
-            });
-            return action;
-        }
+        && (!loading || view_len == 0)
+    {
+        ui.add_space(50.0);
+        ui.vertical_centered(|ui| {
+            if loading {
+                ui.add(egui::Spinner::new());
+            }
+            ui.label(egui::RichText::new(msg).weak());
+            if msg.starts_with("Cannot read") && ui.button("Retry").clicked() {
+                action.retry = true;
+            }
+        });
+        return action;
+    }
 
     let focus_row = app.current_tab().sel.focus;
     let scroll_to = app.current_tab_mut().scroll_to_row.take();
@@ -199,10 +199,8 @@ pub fn file_table(app: &mut FluxApp, ui: &mut egui::Ui) -> RowAction {
                     pal.text_secondary
                 };
                 let resp = ui.add(
-                    egui::Label::new(
-                        egui::RichText::new(label).size(12.0).color(col),
-                    )
-                    .sense(egui::Sense::click()),
+                    egui::Label::new(egui::RichText::new(label).size(12.0).color(col))
+                        .sense(egui::Sense::click()),
                 );
                 if sorted {
                     let r = egui::Rect::from_center_size(
@@ -223,112 +221,108 @@ pub fn file_table(app: &mut FluxApp, ui: &mut egui::Ui) -> RowAction {
         }
     };
 
-    builder
-        .header(22.0, header)
-        .body(|body| {
-            body.rows(row_h, view_len, |mut row| {
-                let row_idx = row.index();
-                let (idx, name, kind, size, mtime, ext, icon_key, abs_path) = {
-                    let s = match snap.read() {
-                        Ok(s) => s,
-                        Err(_) => return,
-                    };
-                    let Some((idx, e)) = s.row(row_idx) else {
-                        return;
-                    };
-                    (
-                        idx,
-                        e.display_name().into_owned(),
-                        e.kind,
-                        e.size,
-                        e.mtime,
-                        e.extension().map(|x| x.to_string_lossy().into_owned()),
-                        crate::icon_cache::IconKey::for_entry(e, &s.path.join(&e.name)),
-                        s.path.join(&e.name),
-                    )
+    builder.header(22.0, header).body(|body| {
+        body.rows(row_h, view_len, |mut row| {
+            let row_idx = row.index();
+            let (idx, name, kind, size, mtime, ext, icon_key, abs_path) = {
+                let s = match snap.read() {
+                    Ok(s) => s,
+                    Err(_) => return,
                 };
+                let Some((idx, e)) = s.row(row_idx) else {
+                    return;
+                };
+                (
+                    idx,
+                    e.display_name().into_owned(),
+                    e.kind,
+                    e.size,
+                    e.mtime,
+                    e.extension().map(|x| x.to_string_lossy().into_owned()),
+                    crate::icon_cache::IconKey::for_entry(e, &s.path.join(&e.name)),
+                    s.path.join(&e.name),
+                )
+            };
 
-                let selected = sel.contains(idx);
-                row.set_selected(selected);
+            let selected = sel.contains(idx);
+            row.set_selected(selected);
 
-                row.col(|ui| {
-                    let rect = ui.available_rect_before_wrap();
-                    let icon_rect = row_icon_rect(rect, row_h);
-                    match icons.texture(&icon_key, &abs_path) {
-                        Some(tex) => {
-                            ui.painter().image(
-                                tex,
-                                icon_rect,
-                                egui::Rect::from_min_max(
-                                    egui::pos2(0.0, 0.0),
-                                    egui::pos2(1.0, 1.0),
-                                ),
-                                Color32::WHITE,
-                            );
-                        }
-                        None => paint_entry_icon(ui.painter(), icon_rect, kind, &pal),
+            row.col(|ui| {
+                let rect = ui.available_rect_before_wrap();
+                let icon_rect = row_icon_rect(rect, row_h);
+                match icons.texture(&icon_key, &abs_path) {
+                    Some(tex) => {
+                        ui.painter().image(
+                            tex,
+                            icon_rect,
+                            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                            Color32::WHITE,
+                        );
                     }
-                    let text_pos = egui::pos2(rect.left() + row_h * 1.05, rect.center().y);
-                    ui.painter().text(
-                        text_pos,
-                        egui::Align2::LEFT_CENTER,
-                        &name,
-                        egui::FontId::default(),
-                        pal.text_primary,
-                    );
-                });
-                // Metadata is secondary information — quieter color.
-                row.col(|ui| {
-                    ui.label(
-                        egui::RichText::new(format_size(size)).color(pal.text_secondary),
-                    );
-                });
-                row.col(|ui| {
-                    ui.label(
-                        egui::RichText::new(format_mtime(mtime)).color(pal.text_secondary),
-                    );
-                });
-                row.col(|ui| {
-                    ui.label(
-                        egui::RichText::new(match kind {
-                            EntryKind::Dir => "Folder",
-                            EntryKind::Symlink => "Link",
-                            _ => flux_platform::type_label(ext.as_deref()),
-                        })
-                        .color(pal.text_secondary),
-                    );
-                });
-
-                let resp = row.response();
-                if resp.drag_started() {
-                    action.drag_start = Some(row_idx);
+                    None => paint_entry_icon(ui.painter(), icon_rect, kind, &pal),
                 }
-                if drag_active && kind == EntryKind::Dir && resp.hovered() {
-                    action.drop_row = Some(row_idx);
-                    // Bright accent glow marking the drop target row.
-                    crate::glyphs::glow_drop_target(
-                        &egui_ctx.debug_painter(),
-                        resp.rect,
-                        egui_ctx.style_of(egui_ctx.theme()).visuals.selection.stroke.color,
-                    );
-                }
-                if resp.clicked() {
-                    let mods = egui_ctx.input(|i| i.modifiers);
-                    action.click = Some(row_idx);
-                    action.click_shift = mods.shift;
-                    action.click_cmd = mods.command;
-                }
-                if resp.double_clicked() {
-                    action.open = Some(idx);
-                }
-                if resp.middle_clicked() && kind == EntryKind::Dir {
-                    action.open_new_tab = Some(idx);
-                }
-                if resp.secondary_clicked() {
-                    action.context = Some((row_idx, resp.interact_pointer_pos().unwrap_or_default()));
-                }
+                let text_pos = egui::pos2(rect.left() + row_h * 1.05, rect.center().y);
+                ui.painter().text(
+                    text_pos,
+                    egui::Align2::LEFT_CENTER,
+                    &name,
+                    egui::FontId::default(),
+                    pal.text_primary,
+                );
             });
+            // Metadata is secondary information — quieter color.
+            row.col(|ui| {
+                ui.label(egui::RichText::new(format_size(size)).color(pal.text_secondary));
+            });
+            row.col(|ui| {
+                ui.label(egui::RichText::new(format_mtime(mtime)).color(pal.text_secondary));
+            });
+            row.col(|ui| {
+                ui.label(
+                    egui::RichText::new(match kind {
+                        EntryKind::Dir => "Folder",
+                        EntryKind::Symlink => "Link",
+                        _ => flux_platform::type_label(ext.as_deref()),
+                    })
+                    .color(pal.text_secondary),
+                );
+            });
+
+            let resp = row.response();
+            if resp.drag_started() {
+                action.drag_start = Some(row_idx);
+            }
+            if drag_active && kind == EntryKind::Dir && resp.hovered() {
+                action.drop_row = Some(row_idx);
+                // Bright accent glow marking the drop target row.
+                crate::glyphs::glow_drop_target(
+                    &egui_ctx.debug_painter(),
+                    resp.rect,
+                    egui_ctx
+                        .style_of(egui_ctx.theme())
+                        .visuals
+                        .selection
+                        .stroke
+                        .color,
+                );
+            }
+            if resp.clicked() {
+                let mods = egui_ctx.input(|i| i.modifiers);
+                action.click = Some(row_idx);
+                action.click_shift = mods.shift;
+                action.click_cmd = mods.command;
+            }
+            if resp.double_clicked() {
+                action.open = Some(idx);
+            }
+            if resp.middle_clicked() && kind == EntryKind::Dir {
+                action.open_new_tab = Some(idx);
+            }
+            if resp.secondary_clicked() {
+                action.context = Some((row_idx, resp.interact_pointer_pos().unwrap_or_default()));
+            }
         });
+    });
 
     let _ = focus_row;
     action

@@ -64,12 +64,7 @@ impl ComputeEngine {
                     //    that blocks UI snapshot reads.
                     let ok = match inputs {
                         Some((entries, sort, filter, show_hidden, version)) => {
-                            let view = build_view(
-                                &entries,
-                                &sort,
-                                filter.as_deref(),
-                                show_hidden,
-                            );
+                            let view = build_view(&entries, &sort, filter.as_deref(), show_hidden);
                             // 3. Apply under a short WRITE lock, re-checking
                             //    every input that could have changed while we
                             //    computed (entries appended → version bumps;

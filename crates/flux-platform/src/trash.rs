@@ -27,10 +27,7 @@ pub fn trash_items(items: &[PathBuf]) -> (usize, Vec<(PathBuf, TrashError)>) {
     for p in items {
         match trash::delete(p) {
             Ok(()) => ok += 1,
-            Err(e) => errs.push((
-                p.clone(),
-                TrashError::Failed(format!("trash failed: {e}")),
-            )),
+            Err(e) => errs.push((p.clone(), TrashError::Failed(format!("trash failed: {e}")))),
         }
     }
     (ok, errs)

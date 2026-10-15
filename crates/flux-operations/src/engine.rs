@@ -25,19 +25,43 @@ pub type OpId = u64;
 
 #[derive(Debug)]
 pub enum OpKind {
-    Copy { sources: Vec<PathBuf>, dest_dir: PathBuf },
-    Move { sources: Vec<PathBuf>, dest_dir: PathBuf },
-    Trash { items: Vec<PathBuf> },
+    Copy {
+        sources: Vec<PathBuf>,
+        dest_dir: PathBuf,
+    },
+    Move {
+        sources: Vec<PathBuf>,
+        dest_dir: PathBuf,
+    },
+    Trash {
+        items: Vec<PathBuf>,
+    },
     /// Permanent delete — never a fallback when trash is unavailable.
-    Delete { items: Vec<PathBuf> },
+    Delete {
+        items: Vec<PathBuf>,
+    },
     /// Copy each item next to itself as "name copy.ext" / "name copy N".
-    Duplicate { items: Vec<PathBuf> },
+    Duplicate {
+        items: Vec<PathBuf>,
+    },
     /// Compress items into a .zip at `dest`.
-    Compress { items: Vec<PathBuf>, dest: PathBuf },
-    Rename { from: PathBuf, to: PathBuf },
-    BatchRename { actions: Vec<RenameAction> },
-    Mkdir { path: PathBuf },
-    CreateFile { path: PathBuf },
+    Compress {
+        items: Vec<PathBuf>,
+        dest: PathBuf,
+    },
+    Rename {
+        from: PathBuf,
+        to: PathBuf,
+    },
+    BatchRename {
+        actions: Vec<RenameAction>,
+    },
+    Mkdir {
+        path: PathBuf,
+    },
+    CreateFile {
+        path: PathBuf,
+    },
 }
 
 pub struct OpJob {
@@ -65,19 +89,22 @@ pub struct OpHandle {
 
 impl OpHandle {
     pub fn progress_snapshot(&self) -> OpProgress {
-        self.progress.lock().map(|p| OpProgress {
-            state: p.state.clone(),
-            total_items: p.total_items,
-            done_items: p.done_items,
-            total_bytes: p.total_bytes,
-            done_bytes: p.done_bytes,
-            current_item: p.current_item.clone(),
-            errors: p.errors.clone(),
-            error_count: p.error_count,
-            started: p.started,
-            finished: p.finished,
-            tracks_bytes: p.tracks_bytes,
-        }).unwrap_or_default()
+        self.progress
+            .lock()
+            .map(|p| OpProgress {
+                state: p.state.clone(),
+                total_items: p.total_items,
+                done_items: p.done_items,
+                total_bytes: p.total_bytes,
+                done_bytes: p.done_bytes,
+                current_item: p.current_item.clone(),
+                errors: p.errors.clone(),
+                error_count: p.error_count,
+                started: p.started,
+                finished: p.finished,
+                tracks_bytes: p.tracks_bytes,
+            })
+            .unwrap_or_default()
     }
 }
 
@@ -136,23 +163,25 @@ impl OpEngine {
     /// Cancel a running or queued op (also answers any pending conflict).
     pub fn cancel(&self, id: OpId) {
         if let Ok(ops) = self.ops.read()
-            && let Some(op) = ops.iter().find(|o| o.id == id) {
-                op.cancel.store(true, Ordering::Relaxed);
-                if let Some(tx) = op.conflict_reply.lock().unwrap().take() {
-                    let _ = tx.send(ConflictDecision {
-                        action: ConflictAction::CancelOp,
-                        apply_all: false,
-                    });
-                }
+            && let Some(op) = ops.iter().find(|o| o.id == id)
+        {
+            op.cancel.store(true, Ordering::Relaxed);
+            if let Some(tx) = op.conflict_reply.lock().unwrap().take() {
+                let _ = tx.send(ConflictDecision {
+                    action: ConflictAction::CancelOp,
+                    apply_all: false,
+                });
             }
+        }
     }
 
     pub fn answer_conflict(&self, query_op: OpId, decision: ConflictDecision) {
         if let Ok(ops) = self.ops.read()
             && let Some(op) = ops.iter().find(|o| o.id == query_op)
-                && let Some(tx) = op.conflict_reply.lock().unwrap().take() {
-                    let _ = tx.send(decision);
-                }
+            && let Some(tx) = op.conflict_reply.lock().unwrap().take()
+        {
+            let _ = tx.send(decision);
+        }
     }
 
     /// Active ops (not finished), for the status bar / progress panel.
@@ -367,9 +396,7 @@ fn run_job(
                         | Ok(crate::copy::ItemOutcome::Partial) => {}
                         Ok(crate::copy::ItemOutcome::Skipped)
                         | Ok(crate::copy::ItemOutcome::Cancelled) => {}
-                        Err(e) => {
-                            crate::copy::note_error(&ctx, format!("{}: {e}", src.display()))
-                        }
+                        Err(e) => crate::copy::note_error(&ctx, format!("{}: {e}", src.display())),
                     }
                     dirty(ev_tx);
                     continue;

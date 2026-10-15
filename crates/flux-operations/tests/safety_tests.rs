@@ -29,7 +29,10 @@ fn tmp() -> (tempfile::TempDir, PathBuf) {
 
 fn write_file(dir: &Path, name: &str, contents: &[u8]) -> PathBuf {
     let p = dir.join(name);
-    std::fs::File::create(&p).unwrap().write_all(contents).unwrap();
+    std::fs::File::create(&p)
+        .unwrap()
+        .write_all(contents)
+        .unwrap();
     p
 }
 
@@ -219,7 +222,11 @@ fn staging_never_truncates_existing_data() {
     let cx = ctx(&p, &c, &resolve);
     copy_file(&src, &dir.join("b.txt"), &cx).unwrap();
     assert_eq!(read(&dir.join("b.txt")), b"NEW");
-    assert_eq!(read(&stale), b"SENTINEL", "staging truncated a leftover file");
+    assert_eq!(
+        read(&stale),
+        b"SENTINEL",
+        "staging truncated a leftover file"
+    );
 }
 
 #[test]
@@ -302,7 +309,10 @@ fn cross_volume_move_preserves_untransferred_source() {
     // A fifo can never be copied (it isn't a file/dir/symlink) — the move
     // must keep it rather than delete the source tree.
     let fifo = src.join("stuck");
-    std::process::Command::new("mkfifo").arg(&fifo).status().unwrap();
+    std::process::Command::new("mkfifo")
+        .arg(&fifo)
+        .status()
+        .unwrap();
     let dst = dir.join("dst");
     std::fs::create_dir(&dst).unwrap();
 
@@ -545,7 +555,10 @@ fn non_utf8_filename_survives_copy() {
 fn fifo_is_reported_not_opened() {
     let (_t, dir) = tmp();
     let src = dir.join("pipe");
-    std::process::Command::new("mkfifo").arg(&src).status().unwrap();
+    std::process::Command::new("mkfifo")
+        .arg(&src)
+        .status()
+        .unwrap();
 
     let (p, c) = fresh!();
     let resolve = |_: &Path, _: &Path| ConflictAction::Overwrite;

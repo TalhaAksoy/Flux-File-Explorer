@@ -2,7 +2,6 @@ use std::ffi::{OsStr, OsString};
 use std::path::Path;
 use std::time::SystemTime;
 
-
 /// What kind of filesystem object an entry is. Determined without following
 /// symlinks: a symlink reports [`EntryKind::Symlink`], not its target's kind.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -70,7 +69,9 @@ pub fn contains_case_insensitive(hay: &str, needle: &str) -> bool {
     // lowercased copy of the whole haystack when hay is short; for long
     // haystacks one allocation is cheaper than a custom fold loop.
     if needle.is_ascii() && hay.is_ascii() {
-        return hay.to_ascii_lowercase().contains(&needle.to_ascii_lowercase());
+        return hay
+            .to_ascii_lowercase()
+            .contains(&needle.to_ascii_lowercase());
     }
     let hay_l = hay.to_lowercase();
     let needle_l = needle.to_lowercase();

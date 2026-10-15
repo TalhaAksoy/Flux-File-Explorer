@@ -204,7 +204,11 @@ fn apply_rules(file_name: &str, parent: &str, index: usize, rules: &[RenameRule]
             }
         }
     }
-    if ext.is_empty() { stem } else { format!("{stem}.{ext}") }
+    if ext.is_empty() {
+        stem
+    } else {
+        format!("{stem}.{ext}")
+    }
 }
 
 /// Compute the full rename plan. `sources` must all be file paths (dirs work

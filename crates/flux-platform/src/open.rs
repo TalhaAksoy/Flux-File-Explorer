@@ -27,10 +27,7 @@ pub fn reveal_path(path: &Path) -> io::Result<()> {
     }
     #[cfg(target_os = "windows")]
     {
-        Command::new("explorer")
-            .arg("/select,")
-            .arg(path)
-            .spawn()?;
+        Command::new("explorer").arg("/select,").arg(path).spawn()?;
         return Ok(());
     }
     #[cfg(all(unix, not(target_os = "macos")))]
@@ -51,18 +48,15 @@ pub fn reveal_path(path: &Path) -> io::Result<()> {
 /// `FLUX_TERMINAL` (command name/path); otherwise platform defaults.
 pub fn open_in_terminal(dir: &Path) -> io::Result<()> {
     if let Ok(custom) = std::env::var("FLUX_TERMINAL")
-        && !custom.is_empty() {
-            // Custom terminal: split "cmd args" cheaply on first space.
-            let (bin, args) = match custom.split_once(' ') {
-                Some((b, rest)) => (b.to_string(), vec![rest.to_string()]),
-                None => (custom, Vec::new()),
-            };
-            return Command::new(bin)
-                .args(args)
-                .arg(dir)
-                .spawn()
-                .map(|_| ());
-        }
+        && !custom.is_empty()
+    {
+        // Custom terminal: split "cmd args" cheaply on first space.
+        let (bin, args) = match custom.split_once(' ') {
+            Some((b, rest)) => (b.to_string(), vec![rest.to_string()]),
+            None => (custom, Vec::new()),
+        };
+        return Command::new(bin).args(args).arg(dir).spawn().map(|_| ());
+    }
     platform_terminal(dir)
 }
 

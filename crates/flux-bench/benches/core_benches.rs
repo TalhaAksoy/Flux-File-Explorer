@@ -1,7 +1,7 @@
 //! Micro-benchmarks for the per-frame / per-scan hot paths:
 //! entry sorting (`build_view`) and the comparator itself at 10k and 100k.
 
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use flux_core::sort::{build_view, name_cmp};
 use flux_core::{DirEntry, EntryKind, SortSpec};
 use std::ffi::OsString;
@@ -82,10 +82,12 @@ fn bench_enumerate(c: &mut Criterion) {
                 // Spin until Finished (or the snapshot reports Ready).
                 let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
                 loop {
-                    let done = engine.drain_events().any(|e| matches!(
-                        e,
-                        flux_core::EnumEvent::Finished { gen_id, .. } if gen_id == gen_id0
-                    ));
+                    let done = engine.drain_events().any(|e| {
+                        matches!(
+                            e,
+                            flux_core::EnumEvent::Finished { gen_id, .. } if gen_id == gen_id0
+                        )
+                    });
                     if done || std::time::Instant::now() > deadline {
                         break;
                     }
@@ -97,5 +99,11 @@ fn bench_enumerate(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_view, bench_cmp, bench_entry_clone, bench_enumerate);
+criterion_group!(
+    benches,
+    bench_view,
+    bench_cmp,
+    bench_entry_clone,
+    bench_enumerate
+);
 criterion_main!(benches);

@@ -25,13 +25,27 @@ const CANCEL_CHECK_EVERY: usize = 64;
 /// Payload data is already inside the snapshot; events are cheap signals.
 #[derive(Debug)]
 pub enum EnumEvent {
-    Started { gen_id: u64, path: PathBuf },
+    Started {
+        gen_id: u64,
+        path: PathBuf,
+    },
     /// `total` entries are now in the snapshot (cumulative).
-    Batch { gen_id: u64, total: usize },
-    Finished { gen_id: u64, total: usize },
+    Batch {
+        gen_id: u64,
+        total: usize,
+    },
+    Finished {
+        gen_id: u64,
+        total: usize,
+    },
     /// Scan aborted because a newer request superseded it.
-    Superseded { gen_id: u64 },
-    Error { gen_id: u64, message: String },
+    Superseded {
+        gen_id: u64,
+    },
+    Error {
+        gen_id: u64,
+        message: String,
+    },
 }
 
 struct EnumRequest {
@@ -80,10 +94,17 @@ impl EnumEngine {
         }
         // If the worker died, navigation degrades to "Failed" visibly rather
         // than hanging: mark the snapshot so the UI shows an error state.
-        if self.req_tx.send(EnumRequest { snap: snap.clone(), gen_id }).is_err()
-            && let Ok(mut s) = snap.write() {
-                s.fail("enumeration worker unavailable".into());
-            }
+        if self
+            .req_tx
+            .send(EnumRequest {
+                snap: snap.clone(),
+                gen_id,
+            })
+            .is_err()
+            && let Ok(mut s) = snap.write()
+        {
+            s.fail("enumeration worker unavailable".into());
+        }
         gen_id
     }
 
@@ -121,18 +142,17 @@ fn worker_loop(
     }
 }
 
-fn run_scan(
-    req: &EnumRequest,
-    ev_tx: &mpsc::SyncSender<EnumEvent>,
-    cur_gen: &Arc<AtomicU64>,
-) {
+fn run_scan(req: &EnumRequest, ev_tx: &mpsc::SyncSender<EnumEvent>, cur_gen: &Arc<AtomicU64>) {
     let gen_id = req.gen_id;
     let is_current = |g: u64| cur_gen.load(Ordering::SeqCst) == g;
     if !is_current(gen_id) {
         return;
     }
     let path = req.snap.read().map(|s| s.path.clone()).unwrap_or_default();
-    let _ = ev_tx.try_send(EnumEvent::Started { gen_id, path: path.clone() });
+    let _ = ev_tx.try_send(EnumEvent::Started {
+        gen_id,
+        path: path.clone(),
+    });
 
     let rd = match std::fs::read_dir(&path) {
         Ok(rd) => rd,
@@ -242,7 +262,11 @@ const META_BATCH: usize = 1024;
 #[derive(Debug)]
 pub enum MetaEvent {
     /// `done` of `total` entries now have real size/mtime/readonly.
-    Batch { gen_id: u64, done: usize, total: usize },
+    Batch {
+        gen_id: u64,
+        done: usize,
+        total: usize,
+    },
     /// All entries processed (or no stat needed). Triggers the final sort.
     Finished { gen_id: u64 },
     /// Job aborted — a newer job or navigation superseded it.
@@ -348,7 +372,11 @@ fn run_fill(
     let job_gen = cur_gen.load(Ordering::SeqCst);
     let is_current = || {
         cur_gen.load(Ordering::SeqCst) == job_gen
-            && req.snap.read().map(|s| s.generation == gen_id).unwrap_or(false)
+            && req
+                .snap
+                .read()
+                .map(|s| s.generation == gen_id)
+                .unwrap_or(false)
     };
     if !is_current() {
         let _ = ev_tx.try_send(MetaEvent::Superseded { gen_id });
@@ -396,7 +424,11 @@ fn run_fill(
         let infos: Vec<(std::ffi::OsString, EntryKind)> = match req.snap.read() {
             Ok(s) if s.generation == gen_id => idxs
                 .iter()
-                .filter_map(|&i| s.entries().get(i as usize).map(|e| (e.name.clone(), e.kind)))
+                .filter_map(|&i| {
+                    s.entries()
+                        .get(i as usize)
+                        .map(|e| (e.name.clone(), e.kind))
+                })
                 .collect(),
             _ => return,
         };
@@ -405,7 +437,11 @@ fn run_fill(
             if let Ok(md) = std::fs::symlink_metadata(path.join(name)) {
                 batch.push((
                     i,
-                    if *kind == EntryKind::File { md.len() } else { crate::UNKNOWN_SIZE },
+                    if *kind == EntryKind::File {
+                        md.len()
+                    } else {
+                        crate::UNKNOWN_SIZE
+                    },
                     md.modified().ok(),
                     md.permissions().readonly(),
                 ));

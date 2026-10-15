@@ -169,8 +169,14 @@ pub fn cmp_entries(a: &DirEntry, b: &DirEntry, spec: &SortSpec) -> Ordering {
             (None, None) => Ordering::Equal,
         },
         SortKey::Extension => {
-            let ea = a.extension().map(|e| e.to_string_lossy()).unwrap_or_default();
-            let eb = b.extension().map(|e| e.to_string_lossy()).unwrap_or_default();
+            let ea = a
+                .extension()
+                .map(|e| e.to_string_lossy())
+                .unwrap_or_default();
+            let eb = b
+                .extension()
+                .map(|e| e.to_string_lossy())
+                .unwrap_or_default();
             folded_cmp(&ea, &eb, true)
         }
         SortKey::Kind => {

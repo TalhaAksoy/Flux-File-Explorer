@@ -1,9 +1,9 @@
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
+use crate::EntryIdx;
 use crate::entry::DirEntry;
 use crate::sort::SortSpec;
-use crate::EntryIdx;
 
 #[derive(Clone, Debug)]
 pub enum LoadState {
@@ -85,12 +85,11 @@ impl DirSnapshot {
         self.entries.append(batch);
         let filter = self.filter.as_deref();
         let show_hidden = self.show_hidden;
-        self.view.extend(
-            (base..self.entries.len() as EntryIdx).filter(|&i| {
+        self.view
+            .extend((base..self.entries.len() as EntryIdx).filter(|&i| {
                 let e = &self.entries[i as usize];
                 (show_hidden || !e.hidden) && e.matches_filter(filter)
-            }),
-        );
+            }));
         self.state = LoadState::Loading {
             received: self.entries.len(),
         };
@@ -107,10 +106,7 @@ impl DirSnapshot {
     /// Apply background-statted metadata to entries in place. Indices are
     /// stable (entries are append-only), so this is safe mid-view. The
     /// version bump lets in-flight compute work notice fresher data.
-    pub fn apply_meta(
-        &mut self,
-        items: &[(EntryIdx, u64, Option<std::time::SystemTime>, bool)],
-    ) {
+    pub fn apply_meta(&mut self, items: &[(EntryIdx, u64, Option<std::time::SystemTime>, bool)]) {
         for &(i, size, mtime, readonly) in items {
             if let Some(e) = self.entries.get_mut(i as usize) {
                 e.size = size;
@@ -174,7 +170,9 @@ impl DirSnapshot {
     /// Absolute path of an entry without allocating a `PathBuf` for display:
     /// `path` + `name`. Used by operations, never by pure rendering.
     pub fn entry_path(&self, idx: EntryIdx) -> Option<PathBuf> {
-        self.entries.get(idx as usize).map(|e| self.path.join(&e.name))
+        self.entries
+            .get(idx as usize)
+            .map(|e| self.path.join(&e.name))
     }
 
     /// Estimated heap+struct footprint in bytes (for diagnostics/benchmarks).
@@ -184,8 +182,6 @@ impl DirSnapshot {
             .iter()
             .map(|e| std::mem::size_of_val(e) + e.name.len())
             .sum();
-        names
-            + self.view.len() * std::mem::size_of::<EntryIdx>()
-            + std::mem::size_of::<Self>()
+        names + self.view.len() * std::mem::size_of::<EntryIdx>() + std::mem::size_of::<Self>()
     }
 }

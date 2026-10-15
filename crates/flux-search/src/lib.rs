@@ -32,8 +32,15 @@ pub struct SearchHit {
 
 #[derive(Debug)]
 pub enum SearchEvent {
-    Batch { gen_id: u64, hits: Vec<SearchHit> },
-    Done { gen_id: u64, total: usize, cancelled: bool },
+    Batch {
+        gen_id: u64,
+        hits: Vec<SearchHit>,
+    },
+    Done {
+        gen_id: u64,
+        total: usize,
+        cancelled: bool,
+    },
 }
 
 struct Job {

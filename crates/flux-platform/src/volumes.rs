@@ -30,9 +30,7 @@ fn platform_volumes() -> Vec<Volume> {
                 continue;
             }
             // Follow symlinks: /Volumes often links the boot volume.
-            let removable = std::fs::metadata(&p)
-                .map(|m| m.is_dir())
-                .unwrap_or(false);
+            let removable = std::fs::metadata(&p).map(|m| m.is_dir()).unwrap_or(false);
             if removable {
                 out.push(Volume {
                     label: name,
@@ -83,8 +81,20 @@ fn platform_volumes() -> Vec<Volume> {
             };
             let interesting = matches!(
                 fstype,
-                "fuse" | "nfs" | "nfs4" | "cifs" | "smb3" | "sshfs" | "fuseblk"
-                    | "exfat" | "ntfs" | "ntfs3" | "vfat" | "ext4" | "btrfs" | "xfs"
+                "fuse"
+                    | "nfs"
+                    | "nfs4"
+                    | "cifs"
+                    | "smb3"
+                    | "sshfs"
+                    | "fuseblk"
+                    | "exfat"
+                    | "ntfs"
+                    | "ntfs3"
+                    | "vfat"
+                    | "ext4"
+                    | "btrfs"
+                    | "xfs"
             );
             if !interesting {
                 continue;

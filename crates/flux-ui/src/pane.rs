@@ -50,9 +50,10 @@ impl Selection {
     /// Ctrl/Cmd-click: toggle one entry.
     pub fn toggle_row(&mut self, snap: &DirSnapshot, row: usize) {
         if let Some(idx) = snap.row_index(row)
-            && !self.ids.remove(&idx) {
-                self.ids.insert(idx);
-            }
+            && !self.ids.remove(&idx)
+        {
+            self.ids.insert(idx);
+        }
         self.anchor = Some(row);
         self.focus = Some(row);
     }
@@ -63,7 +64,11 @@ impl Selection {
             self.select_row(snap, row);
             return;
         };
-        let (lo, hi) = if anchor <= row { (anchor, row) } else { (row, anchor) };
+        let (lo, hi) = if anchor <= row {
+            (anchor, row)
+        } else {
+            (row, anchor)
+        };
         self.ids.clear();
         for r in lo..=hi {
             if let Some(idx) = snap.row_index(r) {
@@ -76,7 +81,11 @@ impl Selection {
     /// Extend selection by keyboard (shift+arrows): grows from anchor to row.
     pub fn extend_to(&mut self, snap: &DirSnapshot, row: usize) {
         let anchor = self.anchor.unwrap_or(row);
-        let (lo, hi) = if anchor <= row { (anchor, row) } else { (row, anchor) };
+        let (lo, hi) = if anchor <= row {
+            (anchor, row)
+        } else {
+            (row, anchor)
+        };
         self.ids.clear();
         for r in lo..=hi {
             if let Some(idx) = snap.row_index(r) {
@@ -100,10 +109,11 @@ impl Selection {
         self.ids.clear();
         for (row, &idx) in snap.view().iter().enumerate() {
             if let Some(e) = snap.entry(idx)
-                && names.contains(&e.name) {
-                    self.ids.insert(idx);
-                    let _ = row;
-                }
+                && names.contains(&e.name)
+            {
+                self.ids.insert(idx);
+                let _ = row;
+            }
         }
     }
 
