@@ -399,86 +399,76 @@ fn bulk_rename_dialog(app: &mut FluxApp, br: &mut BulkRenameState, ctx: &egui::C
     let mut apply = false;
     card("Bulk Rename")
         .resizable(true)
-        .default_size([560.0, 440.0])
-        .min_size([480.0, 320.0])
+        .default_size([440.0, 470.0])
+        .min_size([380.0, 300.0])
         .show(ctx, |ui| {
-            heading(ui, "Bulk Rename");
-            ui.label(
-                egui::RichText::new(format!(
-                    "{} items · {} ready · {} skipped",
-                    br.plan.len(),
-                    n_ready,
-                    n_skip
-                ))
-                .weak()
-                .small(),
-            );
+            heading(ui, &format!("Rename {} items", br.plan.len()));
             ui.add_space(8.0);
-            ui.columns(2, |cols| {
-                cols[0].set_min_width(208.0);
-                cols[0].vertical(|ui| {
-                    ui.label(egui::RichText::new("Find").weak().small());
-                    if ui
-                        .add(egui::TextEdit::singleline(&mut br.find).desired_width(f32::INFINITY))
-                        .changed()
-                    {
-                        br.dirty = true;
-                        br.last_edit = std::time::Instant::now();
-                    }
-                    ui.add_space(6.0);
-                    ui.label(egui::RichText::new("Replace with").weak().small());
-                    if ui
-                        .add(egui::TextEdit::singleline(&mut br.replace).desired_width(f32::INFINITY))
-                        .changed()
-                    {
-                        br.dirty = true;
-                        br.last_edit = std::time::Instant::now();
-                    }
-                    ui.add_space(8.0);
-                    ui.horizontal(|ui| {
-                        if chip(ui, "Regex", br.regex).clicked() {
-                            br.regex = !br.regex;
-                            br.dirty = true;
-                        }
-                        if chip(ui, "Match case", br.case_sensitive).clicked() {
-                            br.case_sensitive = !br.case_sensitive;
-                            br.dirty = true;
-                        }
-                    });
-                    ui.add_space(8.0);
-                    ui.label(egui::RichText::new("Case").weak().small());
-                    ui.horizontal(|ui| {
-                        for (i, l) in ["Keep", "UPPER", "lower", "Title"].iter().enumerate() {
-                            if chip(ui, l, br.case_mode == i).clicked() {
-                                br.case_mode = i;
-                                br.dirty = true;
-                            }
-                        }
-                    });
-                    ui.add_space(8.0);
-                    if chip(ui, "Numbering", br.numbering).clicked() {
-                        br.numbering = !br.numbering;
+
+            // Core flow: find → replace → preview → rename.
+            ui.label(egui::RichText::new("Find").weak().small());
+            let find_r = ui.add(
+                egui::TextEdit::singleline(&mut br.find).desired_width(f32::INFINITY),
+            );
+            if find_r.changed() {
+                br.dirty = true;
+                br.last_edit = std::time::Instant::now();
+            }
+            ui.add_space(6.0);
+            ui.label(egui::RichText::new("Replace with").weak().small());
+            if ui
+                .add(egui::TextEdit::singleline(&mut br.replace).desired_width(f32::INFINITY))
+                .changed()
+            {
+                br.dirty = true;
+                br.last_edit = std::time::Instant::now();
+            }
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                if chip(ui, "Regex", br.regex).clicked() {
+                    br.regex = !br.regex;
+                    br.dirty = true;
+                }
+                if chip(ui, "Match case", br.case_sensitive).clicked() {
+                    br.case_sensitive = !br.case_sensitive;
+                    br.dirty = true;
+                }
+                if chip(ui, "Number", br.numbering).clicked() {
+                    br.numbering = !br.numbering;
+                    br.dirty = true;
+                }
+            });
+            if br.numbering {
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Start").weak().small());
+                    if ui.add(egui::DragValue::new(&mut br.num_start)).changed() {
                         br.dirty = true;
                     }
-                    if br.numbering {
-                        ui.add_space(4.0);
-                        ui.horizontal(|ui| {
-                            ui.label(egui::RichText::new("Start").weak().small());
-                            if ui.add(egui::DragValue::new(&mut br.num_start)).changed() {
-                                br.dirty = true;
-                            }
-                            ui.label(egui::RichText::new("Pad").weak().small());
-                            if ui.add(egui::DragValue::new(&mut br.num_pad).range(0..=8)).changed() {
-                                br.dirty = true;
-                            }
-                        });
-                        if chip(ui, "Number first", br.num_prefix).clicked() {
-                            br.num_prefix = !br.num_prefix;
-                            br.dirty = true;
-                        }
+                    ui.label(egui::RichText::new("Pad").weak().small());
+                    if ui.add(egui::DragValue::new(&mut br.num_pad).range(0..=8)).changed() {
+                        br.dirty = true;
                     }
-                    ui.add_space(8.0);
-                    ui.label(egui::RichText::new("Template").weak().small());
+                    if chip(ui, "Number first", br.num_prefix).clicked() {
+                        br.num_prefix = !br.num_prefix;
+                        br.dirty = true;
+                    }
+                });
+            }
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("Case").weak().small());
+                for (i, l) in ["Keep", "UPPER", "lower", "Title"].iter().enumerate() {
+                    if chip(ui, l, br.case_mode == i).clicked() {
+                        br.case_mode = i;
+                        br.dirty = true;
+                    }
+                }
+            });
+
+            egui::CollapsingHeader::new("Advanced: template")
+                .default_open(false)
+                .show(ui, |ui| {
                     if ui
                         .add(
                             egui::TextEdit::singleline(&mut br.template)
@@ -492,59 +482,63 @@ fn bulk_rename_dialog(app: &mut FluxApp, br: &mut BulkRenameState, ctx: &egui::C
                     }
                     ui.weak("{name} {ext} {n} {n:000} {parent}");
                 });
-                cols[1].vertical(|ui| {
-                    ui.label(egui::RichText::new("Preview").weak().small());
-                    egui::Frame::group(ui.style()).show(ui, |ui| {
-                        egui::ScrollArea::both()
-                            .id_salt("bulk_preview")
-                            .auto_shrink([false, false])
-                            .show(ui, |ui| {
-                                egui::Grid::new("bulk_grid").striped(true).show(ui, |ui| {
-                                    for a in br.plan.iter().take(PREVIEW_CAP) {
-                                        let src_n = a
-                                            .src
-                                            .file_name()
-                                            .map(|n| n.to_string_lossy().into_owned())
-                                            .unwrap_or_default();
-                                        let dst_n = a
-                                            .dst
-                                            .file_name()
-                                            .map(|n| n.to_string_lossy().into_owned())
-                                            .unwrap_or_default();
-                                        let col = match &a.status {
-                                            RenameStatus::Ready => ui.visuals().text_color(),
-                                            RenameStatus::Unchanged => ui.visuals().weak_text_color(),
-                                            _ => ui.visuals().error_fg_color,
-                                        };
-                                        ui.label(egui::RichText::new(src_n).color(col).size(12.5));
-                                        let (ar, _) = ui.allocate_exact_size(
-                                            egui::Vec2::splat(12.0),
-                                            egui::Sense::hover(),
-                                        );
-                                        crate::glyphs::paint_glyph(
-                                            ui.painter(),
-                                            ar,
-                                            crate::glyphs::Glyph::Forward,
-                                            ui.visuals().weak_text_color(),
-                                        );
-                                        ui.label(egui::RichText::new(dst_n).color(col).size(12.5));
-                                        if !a.status.is_ready() && a.status != RenameStatus::Unchanged {
-                                            ui.label(
-                                                egui::RichText::new(format!("{:?}", a.status))
-                                                    .small()
-                                                    .color(ui.visuals().error_fg_color),
-                                            );
-                                        }
-                                        ui.end_row();
-                                    }
-                                });
-                                if br.plan.len() > PREVIEW_CAP {
-                                    ui.weak(format!("…and {} more", br.plan.len() - PREVIEW_CAP));
+            ui.add_space(4.0);
+
+            // Live preview — the confirmation of what will happen.
+            ui.label(egui::RichText::new(format!("Preview — {n_ready} ready · {n_skip} skipped"))
+                .weak()
+                .small());
+            egui::Frame::group(ui.style()).show(ui, |ui| {
+                egui::ScrollArea::both()
+                    .id_salt("bulk_preview")
+                    .max_height(180.0)
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        egui::Grid::new("bulk_grid").striped(true).show(ui, |ui| {
+                            for a in br.plan.iter().take(PREVIEW_CAP) {
+                                let src_n = a
+                                    .src
+                                    .file_name()
+                                    .map(|n| n.to_string_lossy().into_owned())
+                                    .unwrap_or_default();
+                                let dst_n = a
+                                    .dst
+                                    .file_name()
+                                    .map(|n| n.to_string_lossy().into_owned())
+                                    .unwrap_or_default();
+                                let col = match &a.status {
+                                    RenameStatus::Ready => ui.visuals().text_color(),
+                                    RenameStatus::Unchanged => ui.visuals().weak_text_color(),
+                                    _ => ui.visuals().error_fg_color,
+                                };
+                                ui.label(egui::RichText::new(src_n).color(col).size(12.5));
+                                let (ar, _) = ui.allocate_exact_size(
+                                    egui::Vec2::splat(12.0),
+                                    egui::Sense::hover(),
+                                );
+                                crate::glyphs::paint_glyph(
+                                    ui.painter(),
+                                    ar,
+                                    crate::glyphs::Glyph::Forward,
+                                    ui.visuals().weak_text_color(),
+                                );
+                                ui.label(egui::RichText::new(dst_n).color(col).size(12.5));
+                                if !a.status.is_ready() && a.status != RenameStatus::Unchanged {
+                                    ui.label(
+                                        egui::RichText::new(format!("{:?}", a.status))
+                                            .small()
+                                            .color(ui.visuals().error_fg_color),
+                                    );
                                 }
-                            });
+                                ui.end_row();
+                            }
+                        });
+                        if br.plan.len() > PREVIEW_CAP {
+                            ui.weak(format!("…and {} more", br.plan.len() - PREVIEW_CAP));
+                        }
                     });
-                });
             });
+
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
