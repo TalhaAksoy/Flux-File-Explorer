@@ -46,16 +46,25 @@ impl FluxApp {
             self.palette_query.clear();
         }
         if i.1 {
-            // Escape: close the topmost overlay, else clear filter.
+            // Escape: close the topmost overlay first, then transient UI
+            // state (drag, filter), then the selection itself — matching
+            // Explorer/Finder layering.
             if self.palette_open {
                 self.palette_open = false;
+            } else if self.context_menu_pos.is_some() || self.bg_menu_pos.is_some() {
+                self.context_menu_pos = None;
+                self.bg_menu_pos = None;
             } else if self.address_edit.is_some() {
                 self.address_edit = None;
             } else if !matches!(self.dialog, Dialog::None) {
                 self.dialog = Dialog::None;
+            } else if self.dragging.is_some() {
+                self.dragging = None;
             } else if !self.filter_text.is_empty() {
                 self.filter_text.clear();
                 self.set_filter(String::new());
+            } else {
+                self.current_tab_mut().sel.clear();
             }
             return;
         }
@@ -111,6 +120,23 @@ impl FluxApp {
             trash, delete_perm, enter, down, down_s, up_k, up_s, pgdn, pgup,
             home, end, duplicate,
         ) = hits;
+
+        // Ctrl+Tab / Ctrl+Shift+Tab — cycle tabs (browser standard).
+        let (next_tab, prev_tab) = ctx.input_mut(|i| {
+            (
+                i.consume_key(cmd | shift, K::Tab),
+                i.consume_key(cmd, K::Tab),
+            )
+        });
+        let n_tabs = self.tabs.len();
+        if next_tab && n_tabs > 1 {
+            let i = (self.active + 1) % n_tabs;
+            self.activate_tab(i);
+        }
+        if prev_tab && n_tabs > 1 {
+            let i = (self.active + n_tabs - 1) % n_tabs;
+            self.activate_tab(i);
+        }
 
         if new_tab {
             self.new_tab();
@@ -439,7 +465,9 @@ impl eframe::App for FluxApp {
         self.pump(ctx);
     }
 
-    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+    // `frame` is only used on macOS/Windows (OS drag hand-off is cfg'd out
+    // elsewhere) — underscore silences the unused-variable lint on Linux.
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.ensure_started();
         self.handle_keys(&ctx);
@@ -510,6 +538,7 @@ impl eframe::App for FluxApp {
             .show(ui, |ui| {
                 chrome::status_bar(self, ui, &mut act);
             });
+        let mut row_action = view::RowAction::default();
         let central = egui::CentralPanel::default().show(ui, |ui| {
             if self.search_ui.active {
                 self.search_view(ui);
@@ -520,6 +549,16 @@ impl eframe::App for FluxApp {
                 view::apply_click(self, &row_act);
                 if let Some(idx) = row_act.open {
                     self.open_entry(idx);
+                }
+                if let Some(idx) = row_act.open_new_tab {
+                    let p = {
+                        let s = self.current_tab().snap.read().unwrap();
+                        s.entry_path(idx)
+                    };
+                    if let Some(p) = p
+                        && p.is_dir() {
+                            self.new_tab_at(p);
+                        }
                 }
                 if let Some(spec) = row_act.sort {
                     self.set_sort(spec);
@@ -552,6 +591,7 @@ impl eframe::App for FluxApp {
                     }
                     self.context_menu_pos = Some(pos);
                 }
+                row_action = row_act;
                 Some(had_row_ctx)
             }
         });
@@ -569,6 +609,10 @@ impl eframe::App for FluxApp {
         {
             self.bg_menu_pos = ctx.pointer_interact_pos();
         }
+
+        // Was a popup menu open this frame? Captured before the dismiss
+        // checks below — a click that closed a menu must not also deselect.
+        let menu_was_open = self.context_menu_pos.is_some() || self.bg_menu_pos.is_some();
 
         // Row context menu overlay; persists until a click outside it.
         if let Some(pos) = self.context_menu_pos {
@@ -628,6 +672,28 @@ impl eframe::App for FluxApp {
             if clicked_elsewhere || item_chosen {
                 self.bg_menu_pos = None;
             }
+        }
+
+        // Explorer/Finder behavior: a primary click on empty table space
+        // (below the last row) clears the selection. Clicks that hit a row,
+        // header, menu, or dialog produced an action above and are skipped.
+        if row_action.click.is_none()
+            && row_action.open.is_none()
+            && row_action.open_new_tab.is_none()
+            && row_action.context.is_none()
+            && row_action.sort.is_none()
+            && row_action.drag_start.is_none()
+            && self.dragging.is_none()
+            && !self.search_ui.active
+            && !menu_was_open
+            && matches!(self.dialog, Dialog::None)
+            && !self.palette_open
+            && ctx.input(|i| i.pointer.primary_clicked())
+            && ctx
+                .pointer_interact_pos()
+                .is_some_and(|p| central_rect.contains(p))
+        {
+            self.current_tab_mut().sel.clear();
         }
 
         // --- Internal drag & drop ---
@@ -724,7 +790,7 @@ impl eframe::App for FluxApp {
                     let preview = items.first().cloned().map(drag::Image::File);
                     if let Some(preview) = preview {
                         let _ = drag::start_drag(
-                            frame,
+                            _frame,
                             drag::DragItem::Files(items),
                             preview,
                             |_result, _pos| {},

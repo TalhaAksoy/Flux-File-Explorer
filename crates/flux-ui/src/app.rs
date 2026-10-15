@@ -9,7 +9,7 @@ use flux_core::enumerate::EnumEvent;
 use flux_core::snapshot::SnapshotHandle;
 use flux_core::{ComputeEngine, ComputeEvent, EnumEngine, SortSpec};
 use flux_operations::engine::OpEvent;
-use flux_operations::{ConflictQuery, OpEngine, OpKind};
+use flux_operations::{ConflictQuery, OpEngine, OpKind, OpState};
 use flux_platform::{FsWatcher, Volume, mounted_volumes};
 use flux_search::{SearchEngine, SearchEvent, SearchHit};
 use flux_settings::Settings;
@@ -214,6 +214,8 @@ pub struct FluxApp {
     /// because snapshots carry their own generation.
     pub last_watch_hit: Option<Instant>,
     pub last_gc: Instant,
+    /// Op ids whose failure was already toasted — report once, not per frame.
+    pub reported_ops: rustc_hash::FxHashSet<u64>,
 }
 
 /// An in-flight drag of file rows.
@@ -300,6 +302,7 @@ impl FluxApp {
             dragging: None,
             last_watch_hit: None,
             last_gc: Instant::now(),
+            reported_ops: rustc_hash::FxHashSet::default(),
         }
     }
 
@@ -769,9 +772,10 @@ impl FluxApp {
             self.refresh();
         }
         // Op events.
+        let mut dirty = false;
         for ev in self.ops.drain_events() {
             match ev {
-                OpEvent::Dirty => ctx.request_repaint(),
+                OpEvent::Dirty => dirty = true,
                 OpEvent::Conflict(q) => {
                     self.dialog = Dialog::Conflict {
                         query: q,
@@ -780,6 +784,26 @@ impl FluxApp {
                     ctx.request_repaint();
                 }
             }
+        }
+        if dirty {
+            // The status bar only renders *active* ops — a finished op's
+            // errors would vanish silently, so toast them once each.
+            for op in self.ops.all_ops() {
+                if self.reported_ops.contains(&op.id) {
+                    continue;
+                }
+                let p = op.progress_snapshot();
+                let err = match &p.state {
+                    OpState::Failed(m) => Some(m.clone()),
+                    OpState::DoneWithErrors => p.errors.first().cloned(),
+                    _ => None,
+                };
+                if let Some(err) = err {
+                    self.reported_ops.insert(op.id);
+                    self.toast(format!("{}: {err}", op.label));
+                }
+            }
+            ctx.request_repaint();
         }
         // Icon fetches finished → upload + repaint.
         if self.icons.pump(ctx) > 0 {

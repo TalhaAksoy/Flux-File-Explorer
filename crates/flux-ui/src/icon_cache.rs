@@ -82,7 +82,12 @@ enum IconMsg {
 }
 
 pub struct IconCache {
-    map: RwLock<FxHashMap<IconKey, egui::TextureHandle>>,
+    /// Key → resolved texture, or `None` when the OS has no icon for it
+    /// (Linux ships no provider — `file_icon` always yields None).
+    /// Negative results are cached too: without an entry, `texture()`
+    /// would re-queue the same unresolvable fetch every frame, spinning
+    /// the worker and repaint-looping the UI forever.
+    map: RwLock<FxHashMap<IconKey, Option<egui::TextureHandle>>>,
     in_flight: Mutex<HashSet<IconKey>>,
     res_rx: mpsc::Receiver<IconMsg>,
     /// Keep the sender for the worker.
@@ -139,14 +144,14 @@ impl IconCache {
     /// Read-only lookup — never queues a fetch. Used by the drag ghost,
     /// which must not trigger fetches for its own icon.
     pub fn peek(&self, key: &IconKey) -> Option<egui::TextureId> {
-        self.map.read().unwrap().get(key).map(|t| t.id())
+        self.map.read().unwrap().get(key)?.as_ref().map(|t| t.id())
     }
 
     /// Look up a texture; if missing, queue a fetch and return None.
     /// `path` is the absolute path used as the fetch's representative.
     pub fn texture(&self, key: &IconKey, path: &std::path::Path) -> Option<egui::TextureId> {
         if let Some(t) = self.map.read().unwrap().get(key) {
-            return Some(t.id());
+            return t.as_ref().map(|h| h.id());
         }
         {
             let mut inflight = self.in_flight.lock().unwrap();
@@ -164,21 +169,20 @@ impl IconCache {
         let mut n = 0;
         while let Ok(IconMsg::Result(key, icon)) = self.res_rx.try_recv() {
             self.in_flight.lock().unwrap().remove(&key);
-            if let Some(icon) = icon {
+            let tex = icon.map(|icon| {
                 let img = egui::ColorImage::from_rgba_unmultiplied(
                     [icon.width as usize, icon.height as usize],
                     &icon.rgba,
                 );
-                let tex =
-                    ctx.load_texture("icon", img, egui::TextureOptions::LINEAR);
-                let mut map = self.map.write().unwrap();
-                if map.len() >= MAX_CACHED {
-                    // Evict: simple whole-cache reset — icons re-request on
-                    // next visible frame; keeps eviction O(1) instead of LRU.
-                    map.clear();
-                }
-                map.insert(key, tex);
+                ctx.load_texture("icon", img, egui::TextureOptions::LINEAR)
+            });
+            let mut map = self.map.write().unwrap();
+            if map.len() >= MAX_CACHED {
+                // Evict: simple whole-cache reset — icons re-request on
+                // next visible frame; keeps eviction O(1) instead of LRU.
+                map.clear();
             }
+            map.insert(key, tex);
             n += 1;
         }
         n
@@ -208,6 +212,14 @@ mod tests {
             assert!(std::time::Instant::now() < deadline, "icon never arrived");
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
+        #[cfg(any(target_os = "macos", target_os = "windows"))]
         assert!(c.texture(&IconKey::Folder, Path::new("/tmp")).is_some());
+        // No OS icon provider here: the negative result must be cached —
+        // a re-lookup must return None without queueing another fetch.
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+        {
+            assert!(c.texture(&IconKey::Folder, Path::new("/tmp")).is_none());
+            assert!(c.in_flight.lock().unwrap().is_empty());
+        }
     }
 }

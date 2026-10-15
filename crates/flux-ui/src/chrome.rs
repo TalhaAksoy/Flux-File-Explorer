@@ -254,6 +254,9 @@ pub fn sidebar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
                 }
             });
             drop_target(app, ui, &resp, &path, act);
+            if resp.middle_clicked() {
+                act.new_tab_at = Some(path.clone());
+            }
             if resp.clicked() {
                 act.navigate = Some(path);
             }
@@ -278,6 +281,9 @@ pub fn sidebar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
                     }
                 });
                 drop_target(app, ui, &resp, &p, act);
+                if resp.middle_clicked() {
+                    act.new_tab_at = Some(p.clone());
+                }
                 if resp.clicked() {
                     act.navigate = Some(p);
                 }
@@ -309,6 +315,9 @@ pub fn sidebar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
                     }
                 });
                 drop_target(app, ui, &resp, &p, act);
+                if resp.middle_clicked() {
+                    act.new_tab_at = Some(p.clone());
+                }
                 if resp.clicked() {
                     act.navigate = Some(p);
                 }
@@ -327,6 +336,9 @@ pub fn sidebar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
             )
             .on_hover_text(v.mount.display().to_string());
             drop_target(app, ui, &resp, &v.mount, act);
+            if resp.middle_clicked() {
+                act.new_tab_at = Some(v.mount.clone());
+            }
             if resp.clicked() {
                 act.navigate = Some(v.mount);
             }
@@ -417,6 +429,9 @@ pub fn tab_bar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
                 if xresp.clicked() {
                     close_idx = Some(i);
                 }
+            }
+            if resp.middle_clicked() && n > 1 {
+                close_idx = Some(i);
             }
             if resp.clicked() {
                 act.activate_tab = Some(i);

@@ -213,6 +213,18 @@ pub fn apply_theme(ctx: &egui::Context, dark: bool) {
 /// to egui's bundled fonts if nothing on the list parses/loads.
 pub fn load_system_fonts() -> egui::FontDefinitions {
     let mut defs = egui::FontDefinitions::default();
+    if let Some(bytes) = system_font_bytes() {
+        let data = egui::FontData::from_owned(bytes);
+        defs.font_data.insert("system-ui".into(), std::sync::Arc::new(data));
+        defs.families
+            .entry(egui::FontFamily::Proportional)
+            .or_default()
+            .insert(0, "system-ui".into());
+    }
+    defs
+}
+
+fn system_font_bytes() -> Option<Vec<u8>> {
     let candidates: &[&str] = if cfg!(target_os = "macos") {
         &[
             "/System/Library/Fonts/SFNS.ttf",
@@ -224,6 +236,8 @@ pub fn load_system_fonts() -> egui::FontDefinitions {
             "C:\\Windows\\Fonts\\segoeuivf.ttf",
         ]
     } else {
+        // Fast paths for the Debian/Ubuntu layout; other distros are
+        // covered by the directory scan below.
         &[
             "/usr/share/fonts/truetype/inter/Inter-Regular.otf",
             "/usr/share/fonts/opentype/inter/Inter-Regular.otf",
@@ -235,14 +249,84 @@ pub fn load_system_fonts() -> egui::FontDefinitions {
         ]
     };
     for path in candidates {
-        let Ok(bytes) = std::fs::read(path) else { continue };
-        let data = egui::FontData::from_owned(bytes);
-        defs.font_data.insert("system-ui".into(), std::sync::Arc::new(data));
-        defs.families
-            .entry(egui::FontFamily::Proportional)
-            .or_default()
-            .insert(0, "system-ui".into());
-        break;
+        if let Ok(bytes) = std::fs::read(path) {
+            return Some(bytes);
+        }
     }
-    defs
+    #[cfg(all(unix, not(target_os = "macos")))]
+    return scan_font_dirs();
+    #[allow(unreachable_code)]
+    None
+}
+
+/// Linux distros disagree on font paths (`truetype/` vs `dejavu-sans-fonts/`
+/// vs `google-noto/`), so walk the standard roots and pick a preferred
+/// family by file name. Variable fonts ("Name[wght].ttf", "*-VF.otf") are
+/// skipped — the rasterizer can reject them and epaint panics on bad data.
+#[cfg(all(unix, not(target_os = "macos")))]
+fn scan_font_dirs() -> Option<Vec<u8>> {
+    const PREFERRED: &[&str] = &[
+        "inter-regular",
+        "notosans-regular",
+        "adwaitasans",
+        "cantarell",
+        "dejavusans",
+        "liberationsans-regular",
+        "ubuntu-r",
+    ];
+    // Style variants make poor UI fonts — "dejavusans" also matches
+    // "dejavusans-bold", so name a regular face, not just the family.
+    const NON_REGULAR: &[&str] = &[
+        "bold", "italic", "oblique", "light", "medium", "thin", "black",
+        "condensed", "mono", "semibold", "extra", "display", "hairline", "demi",
+    ];
+    let mut roots = vec![
+        std::path::PathBuf::from("/usr/share/fonts"),
+        std::path::PathBuf::from("/usr/local/share/fonts"),
+    ];
+    if let Ok(home) = std::env::var("HOME") {
+        roots.push(std::path::Path::new(&home).join(".local/share/fonts"));
+        roots.push(std::path::Path::new(&home).join(".fonts"));
+    }
+    let mut files = Vec::new();
+    for root in &roots {
+        collect_font_files(root, 0, &mut files);
+    }
+    for want in PREFERRED {
+        for f in &files {
+            let stem = f
+                .file_stem()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_lowercase();
+            let variable =
+                stem.contains('[') || stem.ends_with("-vf") || stem.ends_with("_vf");
+            let styled = NON_REGULAR.iter().any(|s| stem.contains(s));
+            if !variable && !styled && stem.contains(want)
+                && let Ok(b) = std::fs::read(f) {
+                    return Some(b);
+                }
+        }
+    }
+    None
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn collect_font_files(dir: &std::path::Path, depth: u8, out: &mut Vec<std::path::PathBuf>) {
+    if depth > 4 {
+        return;
+    }
+    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    for e in rd.flatten() {
+        let p = e.path();
+        if p.is_dir() {
+            collect_font_files(&p, depth + 1, out);
+        } else if p.extension().is_some_and(|x| {
+            ["ttf", "otf", "ttc", "otc"]
+                .iter()
+                .any(|ext| x.eq_ignore_ascii_case(ext))
+        }) {
+            out.push(p);
+        }
+    }
 }

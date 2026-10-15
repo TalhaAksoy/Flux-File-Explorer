@@ -92,28 +92,28 @@ fn platform_terminal(dir: &Path) -> io::Result<()> {
 
 #[cfg(all(unix, not(target_os = "macos")))]
 fn platform_terminal(dir: &Path) -> io::Result<()> {
+    // DE-native terminals are spawn clients of a daemon — `current_dir`
+    // does not reliably reach the new shell, so they need an explicit
+    // working-directory flag. Direct-process terminals inherit cwd fine.
     for term in [
-        "x-terminal-emulator",
         "kgx",
         "gnome-terminal",
         "konsole",
         "xfce4-terminal",
+        "x-terminal-emulator",
         "alacritty",
         "kitty",
         "xterm",
     ] {
-        let args: &[&str] = match term {
-            "kgx" | "gnome-terminal" | "konsole" | "xfce4-terminal" => {
-                &[] // cwd via --working-directory differs; use sh -c below
-            }
-            _ => &[],
+        let spawned = match term {
+            "kgx" | "gnome-terminal" | "xfce4-terminal" => Command::new(term)
+                .arg("--working-directory")
+                .arg(dir)
+                .spawn(),
+            "konsole" => Command::new(term).arg("--workdir").arg(dir).spawn(),
+            _ => Command::new(term).current_dir(dir).spawn(),
         };
-        let _ = args;
-        if Command::new(term)
-            .current_dir(dir)
-            .spawn()
-            .is_ok()
-        {
+        if spawned.is_ok() {
             return Ok(());
         }
     }

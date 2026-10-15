@@ -22,6 +22,8 @@ pub struct RowAction {
     pub context: Option<(usize, egui::Pos2)>,
     pub sort: Option<SortSpec>,
     pub retry: bool,
+    /// Middle-click on a directory row → open it in a new tab.
+    pub open_new_tab: Option<EntryIdx>,
     /// A row drag crossed egui's threshold — start a file drag.
     pub drag_start: Option<usize>,
     /// While dragging: the hovered directory row (drop target).
@@ -318,6 +320,9 @@ pub fn file_table(app: &mut FluxApp, ui: &mut egui::Ui) -> RowAction {
                 }
                 if resp.double_clicked() {
                     action.open = Some(idx);
+                }
+                if resp.middle_clicked() && kind == EntryKind::Dir {
+                    action.open_new_tab = Some(idx);
                 }
                 if resp.secondary_clicked() {
                     action.context = Some((row_idx, resp.interact_pointer_pos().unwrap_or_default()));
