@@ -73,6 +73,12 @@ const ICON_PX: u16 = 32;
 /// Hard cap on cached textures; extension diversity is small in practice.
 const MAX_CACHED: usize = 512;
 
+impl Default for IconCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl IconCache {
     pub fn new() -> Self {
         let (req_tx, req_rx) = mpsc::channel::<(IconKey, PathBuf)>();
@@ -151,4 +157,5 @@ impl IconCache {
     }
 }
 
-pub type IconCacheHandle = Arc<IconCache>;
+/// UI-thread-only (the receiver and textures are !Sync). Rc, not Arc.
+pub type IconCacheHandle = std::rc::Rc<IconCache>;

@@ -289,7 +289,7 @@ impl FluxApp {
             free_space: None,
             status_msg: None,
             pending_copy_text: None,
-            icons: std::sync::Arc::new(crate::icon_cache::IconCache::new()),
+            icons: std::rc::Rc::new(crate::icon_cache::IconCache::new()),
             dragging: None,
             last_watch_hit: None,
             last_gc: Instant::now(),
