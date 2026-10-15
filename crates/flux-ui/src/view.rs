@@ -22,6 +22,10 @@ pub struct RowAction {
     pub context: Option<(usize, egui::Pos2)>,
     pub sort: Option<SortSpec>,
     pub retry: bool,
+    /// A row drag crossed egui's threshold — start a file drag.
+    pub drag_start: Option<usize>,
+    /// While dragging: the hovered directory row (drop target).
+    pub drop_row: Option<usize>,
 }
 
 /// 16-px-ish painted glyphs: folder silhouette, document with folded corner,
@@ -139,6 +143,8 @@ pub fn file_table(app: &mut FluxApp, ui: &mut egui::Ui) -> RowAction {
     // Borrow the selection once; row closure does O(1) lookups, no clones.
     let sel = &app.tabs[app.active].sel;
     let egui_ctx = ui.ctx().clone();
+    let icons = app.icons.clone();
+    let drag_active = app.dragging.is_some();
 
     let mut builder = TableBuilder::new(ui)
         .striped(true)
@@ -154,7 +160,7 @@ pub fn file_table(app: &mut FluxApp, ui: &mut egui::Ui) -> RowAction {
         .column(Column::initial(widths[2]).at_least(80.0).resizable(true))
         .column(Column::remainder().at_least(60.0).clip(true))
         .min_scrolled_height(0.0)
-        .sense(Sense::click());
+        .sense(Sense::click_and_drag());
     if let Some(r) = scroll_to {
         builder = builder.scroll_to_row(r, Some(Align::Center));
     }
@@ -191,7 +197,7 @@ pub fn file_table(app: &mut FluxApp, ui: &mut egui::Ui) -> RowAction {
         .body(|body| {
             body.rows(row_h, view_len, |mut row| {
                 let row_idx = row.index();
-                let (idx, name, kind, size, mtime, ext) = {
+                let (idx, name, kind, size, mtime, ext, icon_key, abs_path) = {
                     let s = match snap.read() {
                         Ok(s) => s,
                         Err(_) => return,
@@ -205,8 +211,9 @@ pub fn file_table(app: &mut FluxApp, ui: &mut egui::Ui) -> RowAction {
                         e.kind,
                         e.size,
                         e.mtime,
-                        e.extension()
-                            .map(|x| x.to_string_lossy().to_uppercase()),
+                        e.extension().map(|x| x.to_string_lossy().into_owned()),
+                        crate::icon_cache::IconKey::for_entry(e, &s.path.join(&e.name)),
+                        s.path.join(&e.name),
                     )
                 };
 
@@ -215,7 +222,21 @@ pub fn file_table(app: &mut FluxApp, ui: &mut egui::Ui) -> RowAction {
 
                 row.col(|ui| {
                     let rect = ui.available_rect_before_wrap();
-                    paint_entry_icon(ui.painter(), row_icon_rect(rect, row_h), kind, &pal);
+                    let icon_rect = row_icon_rect(rect, row_h);
+                    match icons.texture(&icon_key, &abs_path) {
+                        Some(tex) => {
+                            ui.painter().image(
+                                tex,
+                                icon_rect,
+                                egui::Rect::from_min_max(
+                                    egui::pos2(0.0, 0.0),
+                                    egui::pos2(1.0, 1.0),
+                                ),
+                                Color32::WHITE,
+                            );
+                        }
+                        None => paint_entry_icon(ui.painter(), icon_rect, kind, &pal),
+                    }
                     let text_pos = egui::pos2(rect.left() + row_h * 1.05, rect.center().y);
                     ui.painter().text(
                         text_pos,
@@ -239,13 +260,30 @@ pub fn file_table(app: &mut FluxApp, ui: &mut egui::Ui) -> RowAction {
                 });
                 row.col(|ui| {
                     ui.label(match kind {
-                        EntryKind::Dir => "Folder".to_string(),
-                        EntryKind::Symlink => "Link".to_string(),
-                        _ => ext.filter(|e| !e.is_empty()).unwrap_or_else(|| "File".into()),
+                        EntryKind::Dir => "Folder",
+                        EntryKind::Symlink => "Link",
+                        _ => flux_platform::type_label(ext.as_deref()),
                     });
                 });
 
                 let resp = row.response();
+                if resp.drag_started() {
+                    action.drag_start = Some(row_idx);
+                }
+                if drag_active && kind == EntryKind::Dir && resp.hovered() {
+                    action.drop_row = Some(row_idx);
+                    // Translucent accent overlay — the drop-target highlight.
+                    egui_ctx.debug_painter().rect_filled(
+                        resp.rect,
+                        4.0,
+                        egui_ctx
+                            .style_of(egui_ctx.theme())
+                            .visuals
+                            .selection
+                            .bg_fill
+                            .gamma_multiply(0.35),
+                    );
+                }
                 if resp.clicked() {
                     let mods = egui_ctx.input(|i| i.modifiers);
                     action.click = Some(row_idx);

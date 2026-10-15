@@ -31,6 +31,23 @@ pub struct ChromeAction {
     pub clear_search: bool,
     pub paste: bool,
     pub cancel_op: Option<u64>,
+    /// Directory widget currently hovered while a file drag is active —
+    /// the drop target on release.
+    pub drop_target: Option<PathBuf>,
+}
+
+/// During a drag, mark `resp` as a drop target for `dir` when hovered and
+/// paint a highlight.
+fn drop_target(app: &FluxApp, ui: &egui::Ui, resp: &egui::Response, dir: &std::path::Path, act: &mut ChromeAction) {
+    if app.dragging.is_some() && resp.hovered() {
+        act.drop_target = Some(dir.to_path_buf());
+        ui.painter().rect_stroke(
+            resp.rect,
+            3.0,
+            ui.visuals().selection.stroke,
+            egui::StrokeKind::Inside,
+        );
+    }
 }
 
 /// Top toolbar: nav buttons, breadcrumb / editable path, filter field.
@@ -89,7 +106,9 @@ pub fn toolbar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
                                 .file_name()
                                 .map(|n| n.to_string_lossy().into_owned())
                                 .unwrap_or_else(|| c.display().to_string());
-                            if ui.link(label).clicked() {
+                            let resp = ui.link(label);
+                            drop_target(app, ui, &resp, &c, act);
+                            if resp.clicked() {
                                 act.navigate = Some(c.clone());
                             }
                             ui.label(egui::RichText::new("›").weak());
@@ -144,7 +163,9 @@ pub fn sidebar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
     egui::ScrollArea::vertical().id_salt("sidebar").show(ui, |ui| {
         ui.label(egui::RichText::new("Places").weak().small());
         for (label, path) in app.known.clone() {
-            if ui.selectable_label(false, label).clicked() {
+            let resp = ui.selectable_label(false, label);
+            drop_target(app, ui, &resp, &path, act);
+            if resp.clicked() {
                 act.navigate = Some(path);
             }
         }
@@ -156,11 +177,11 @@ pub fn sidebar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
                     .file_name()
                     .map(|n| n.to_string_lossy().into_owned())
                     .unwrap_or_else(|| p.display().to_string());
-                if ui
+                let resp = ui
                     .selectable_label(false, label)
-                    .on_hover_text(p.display().to_string())
-                    .clicked()
-                {
+                    .on_hover_text(p.display().to_string());
+                drop_target(app, ui, &resp, &p, act);
+                if resp.clicked() {
                     act.navigate = Some(p);
                 }
             }
@@ -173,7 +194,9 @@ pub fn sidebar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
                     .file_name()
                     .map(|n| n.to_string_lossy().into_owned())
                     .unwrap_or_else(|| p.display().to_string());
-                if ui.selectable_label(false, label).clicked() {
+                let resp = ui.selectable_label(false, label);
+                drop_target(app, ui, &resp, &p, act);
+                if resp.clicked() {
                     act.navigate = Some(p);
                 }
             }
@@ -186,7 +209,9 @@ pub fn sidebar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
             } else {
                 v.label.clone()
             };
-            if ui.selectable_label(false, label).clicked() {
+            let resp = ui.selectable_label(false, label);
+            drop_target(app, ui, &resp, &v.mount, act);
+            if resp.clicked() {
                 act.navigate = Some(v.mount);
             }
         }

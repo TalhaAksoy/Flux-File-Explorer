@@ -26,6 +26,8 @@ pub enum OpKind {
     Trash { items: Vec<PathBuf> },
     /// Permanent delete — never a fallback when trash is unavailable.
     Delete { items: Vec<PathBuf> },
+    /// Copy each item next to itself as "name copy.ext" / "name copy N".
+    Duplicate { items: Vec<PathBuf> },
     Rename { from: PathBuf, to: PathBuf },
     BatchRename { actions: Vec<RenameAction> },
     Mkdir { path: PathBuf },
@@ -199,6 +201,7 @@ fn describe(kind: &OpKind) -> String {
         }
         OpKind::Trash { items } => format!("Trash {} item(s)", items.len()),
         OpKind::Delete { items } => format!("Delete {} item(s)", items.len()),
+        OpKind::Duplicate { items } => format!("Duplicate {} item(s)", items.len()),
         OpKind::Rename { from, .. } => {
             format!("Rename {}", from.display())
         }
@@ -285,7 +288,10 @@ fn ops_worker(
             let mut p = op.progress.lock().unwrap();
             p.state = OpState::Running;
             p.started = Some(Instant::now());
-            p.tracks_bytes = matches!(job.kind, OpKind::Copy { .. } | OpKind::Move { .. });
+            p.tracks_bytes = matches!(
+                job.kind,
+                OpKind::Copy { .. } | OpKind::Move { .. } | OpKind::Duplicate { .. }
+            );
         }
         run_job(&job, &op, &ev_tx, &mut dirty);
         let cancelled_flag = op.cancel.load(Ordering::Relaxed);
@@ -363,6 +369,34 @@ fn run_job(
             }
             if cancelled(&ctx) {
                 cleanup_created(&ctx);
+            }
+        }
+        OpKind::Duplicate { items } => {
+            let resolver = make_resolver(op, ev_tx);
+            let ctx = CopyCtx {
+                progress: &op.progress,
+                cancel: &op.cancel,
+                resolve: &resolver,
+                tag: job.id,
+                created_dirs: Mutex::new(Vec::new()),
+            };
+            discover(&ctx, items);
+            if cancelled(&ctx) {
+                return;
+            }
+            set_state(op, OpState::Running);
+            for src in items {
+                if cancelled(&ctx) {
+                    break;
+                }
+                let dst = crate::copy::duplicate_dst(src);
+                match copy_tree(src, &dst, &ctx) {
+                    Ok(crate::copy::ItemOutcome::Done)
+                    | Ok(crate::copy::ItemOutcome::Skipped)
+                    | Ok(crate::copy::ItemOutcome::Cancelled) => {}
+                    Err(e) => crate::copy::note_error(&ctx, format!("{}: {e}", src.display())),
+                }
+                dirty(ev_tx);
             }
         }
         OpKind::Trash { items } => {

@@ -9,6 +9,7 @@ pub mod app;
 pub mod chrome;
 pub mod dialogs;
 pub mod format;
+pub mod icon_cache;
 pub mod pane;
 pub mod theme;
 pub mod view;
@@ -98,6 +99,7 @@ impl FluxApp {
                 i.consume_key(egui::Modifiers::NONE, K::PageUp),
                 i.consume_key(egui::Modifiers::NONE, K::Home),
                 i.consume_key(egui::Modifiers::NONE, K::End),
+                i.consume_key(cmd, K::D),
             )
         });
         let (
@@ -105,7 +107,7 @@ impl FluxApp {
             focus_filter, focus_address, refresh_h, hidden_h, new_folder,
             hidden_mac, rename, refresh_f5, up_bs, back, fwd, up_alt,
             trash, delete_perm, enter, down, down_s, up_k, up_s, pgdn, pgup,
-            home, end,
+            home, end, duplicate,
         ) = hits;
 
         if new_tab {
@@ -160,6 +162,9 @@ impl FluxApp {
         if paste {
             let dest = self.current_path();
             self.submit_copy(dest);
+        }
+        if duplicate {
+            self.duplicate_selected();
         }
         if copy_paths {
             let text = self
@@ -371,7 +376,7 @@ impl eframe::App for FluxApp {
         self.pump(ctx);
     }
 
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.ensure_started();
         self.handle_keys(&ctx);
@@ -430,6 +435,18 @@ impl eframe::App for FluxApp {
                 if row_act.retry {
                     self.refresh();
                 }
+                if let Some(row) = row_act.drag_start {
+                    self.start_drag_row(row);
+                }
+                if let Some(row) = row_act.drop_row {
+                    let target = {
+                        let s = self.current_tab().snap.read().unwrap();
+                        s.row(row).map(|(_, e)| s.path.join(&e.name))
+                    };
+                    if let Some(t) = target {
+                        act.drop_target = Some(t);
+                    }
+                }
                 if let Some((row, pos)) = row_act.context {
                     // Ensure the row is selected before showing its menu.
                     let tab = self.current_tab_mut();
@@ -474,6 +491,68 @@ impl eframe::App for FluxApp {
             });
             if clicked_elsewhere || item_chosen {
                 self.context_menu_pos = None;
+            }
+        }
+
+        // --- Internal drag & drop ---
+        if self.dragging.is_some() {
+            // Drag ghost following the cursor.
+            if let Some(pos) = ctx.pointer_interact_pos() {
+                let n = self.dragging.as_ref().unwrap().items.len();
+                let first = self.dragging.as_ref().unwrap().items[0]
+                    .file_name()
+                    .map(|f| f.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                let label = if n > 1 {
+                    format!("{first} + {}", n - 1)
+                } else {
+                    first
+                };
+                let copy_hint = ctx.input(|i| i.modifiers.alt);
+                egui::Area::new(egui::Id::new("drag_ghost"))
+                    .order(egui::Order::Tooltip)
+                    .interactable(false)
+                    .fixed_pos(pos + egui::vec2(14.0, 10.0))
+                    .show(&ctx, |ui| {
+                        egui::Frame::popup(ui.style()).show(ui, |ui| {
+                            ui.label(format!(
+                                "{} {}",
+                                label,
+                                if copy_hint { "(copy)" } else { "" }
+                            ));
+                        });
+                    });
+                ctx.request_repaint();
+            }
+
+            // Pointer released → drop on resolved target.
+            if ctx.input(|i| i.pointer.any_released()) {
+                let copy = ctx.input(|i| i.modifiers.alt);
+                match act.drop_target.take() {
+                    Some(target) => self.apply_drop(target, copy),
+                    None => self.dragging = None,
+                }
+            }
+
+            // Pointer left the window while dragging → hand off to the OS.
+            #[cfg(any(target_os = "macos", target_os = "windows"))]
+            if self.dragging.as_ref().is_some_and(|d| !d.handed_to_os) {
+                let pos = ctx.pointer_interact_pos();
+                let outside = pos.is_none_or(|p| !ctx.content_rect().contains(p));
+                if outside {
+                    let drag = self.dragging.take().unwrap();
+                    let items = drag.items.clone();
+                    let preview = items.first().cloned().map(drag::Image::File);
+                    if let Some(preview) = preview {
+                        let _ = drag::start_drag(
+                            frame,
+                            drag::DragItem::Files(items),
+                            preview,
+                            |_result, _pos| {},
+                            drag::Options::default(),
+                        );
+                    }
+                }
             }
         }
 
@@ -591,6 +670,7 @@ pub fn run(start_dir: Option<PathBuf>) -> eframe::Result<()> {
         options,
         Box::new(|cc| {
             let mut app = FluxApp::new();
+            app.icons.set_ctx(cc.egui_ctx.clone());
             if let Some(d) = start_dir.filter(|d| d.is_dir()) {
                 app.navigate(d);
             }

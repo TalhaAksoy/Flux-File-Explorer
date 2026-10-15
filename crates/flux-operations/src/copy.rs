@@ -325,6 +325,39 @@ pub fn remove_tree(path: &Path, c: &CopyCtx<'_>) -> std::io::Result<()> {
     }
 }
 
+/// First free sibling path for duplication: "name copy.ext", then
+/// "name copy 2.ext", … Dirs get no extension part: "name copy".
+pub fn duplicate_dst(src: &Path) -> PathBuf {
+    let parent = src.parent().map(|p| p.to_path_buf()).unwrap_or_default();
+    let name = src.file_name().unwrap_or_default();
+    // Dirs (and ext-less names): stem = whole name, ext = none.
+    let (stem, ext) = if src.is_dir() {
+        (name.to_string_lossy().into_owned(), String::new())
+    } else {
+        let p = Path::new(name);
+        let stem = p
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| name.to_string_lossy().into_owned());
+        let ext = p
+            .extension()
+            .map(|e| format!(".{}", e.to_string_lossy()))
+            .unwrap_or_default();
+        (stem, ext)
+    };
+    for n in 0..1000u32 {
+        let candidate = if n == 0 {
+            parent.join(format!("{stem} copy{ext}"))
+        } else {
+            parent.join(format!("{stem} copy {}{}", n + 1, ext))
+        };
+        if !candidate.try_exists().unwrap_or(true) {
+            return candidate;
+        }
+    }
+    parent.join(format!("{stem} copy {ext}"))
+}
+
 /// After a cancel/failure, drop in-flight temp dirs we created (deepest
 /// first). Never removes anything that existed before the op.
 pub fn cleanup_created(c: &CopyCtx<'_>) {

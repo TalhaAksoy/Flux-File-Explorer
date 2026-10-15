@@ -159,6 +159,7 @@ pub const COMMANDS: &[Command] = &[
     Command { name: "New Folder", id: "new_folder" },
     Command { name: "New File", id: "new_file" },
     Command { name: "Bulk Rename Selected", id: "bulk_rename" },
+    Command { name: "Duplicate Selected", id: "duplicate" },
     Command { name: "Copy Path(s)", id: "copy_paths" },
     Command { name: "Open in Terminal", id: "open_terminal" },
     Command { name: "Toggle Recursive Search", id: "toggle_search" },
@@ -200,10 +201,24 @@ pub struct FluxApp {
     /// Paths text to hand to the OS clipboard on the next frame.
     pub pending_copy_text: Option<String>,
 
+    /// Native icon cache (background worker; glyph fallback until ready).
+    pub icons: crate::icon_cache::IconCacheHandle,
+
+    /// In-progress internal drag: absolute paths being dragged, and the
+    /// pointer position where the drag began.
+    pub dragging: Option<DragState>,
+
     /// Newest-dir events we haven't matched to a tab yet are dropped safely
     /// because snapshots carry their own generation.
     pub last_watch_hit: Option<Instant>,
     pub last_gc: Instant,
+}
+
+/// An in-flight drag of file rows.
+pub struct DragState {
+    pub items: Vec<PathBuf>,
+    /// Set once the pointer left the window and the OS drag was started.
+    pub handed_to_os: bool,
 }
 
 impl Default for FluxApp {
@@ -274,6 +289,8 @@ impl FluxApp {
             free_space: None,
             status_msg: None,
             pending_copy_text: None,
+            icons: std::sync::Arc::new(crate::icon_cache::IconCache::new()),
+            dragging: None,
             last_watch_hit: None,
             last_gc: Instant::now(),
         }
@@ -556,6 +573,77 @@ impl FluxApp {
         self.ops.submit(kind, flux_operations::ConflictPolicy::Ask);
     }
 
+    /// Begin dragging `row`'s entry — or the whole selection if the row is
+    /// already selected. Selects an unselected row first, matching Explorer/
+    /// Finder behavior.
+    pub fn start_drag_row(&mut self, row: usize) {
+        let items = {
+            let tab = self.current_tab_mut();
+            let s = tab.snap.read().unwrap();
+            let Some(idx) = s.row_index(row) else {
+                return;
+            };
+            if !tab.sel.contains(idx) {
+                tab.sel.select_row(&s, row);
+            }
+            tab.sel
+                .ids
+                .iter()
+                .filter_map(|&i| s.entry_path(i))
+                .collect::<Vec<_>>()
+        };
+        if !items.is_empty() {
+            self.dragging = Some(DragState {
+                items,
+                handed_to_os: false,
+            });
+        }
+    }
+
+    /// Execute a completed drop: move (or copy, when `copy` — Option/Alt held)
+    /// the dragged items into `target_dir`. Items whose parent IS the target
+    /// (a no-op move) are filtered out.
+    pub fn apply_drop(&mut self, target_dir: PathBuf, copy: bool) {
+        let Some(drag) = self.dragging.take() else {
+            return;
+        };
+        let items: Vec<PathBuf> = drag
+            .items
+            .into_iter()
+            .filter(|p| p.as_path() != target_dir.as_path() && p.parent() != Some(target_dir.as_path()))
+            .collect();
+        if items.is_empty() {
+            return;
+        }
+        if !target_dir.is_dir() {
+            self.toast(format!("Not a folder: {}", target_dir.display()));
+            return;
+        }
+        let kind = if copy {
+            OpKind::Copy {
+                sources: items,
+                dest_dir: target_dir,
+            }
+        } else {
+            OpKind::Move {
+                sources: items,
+                dest_dir: target_dir,
+            }
+        };
+        self.ops.submit(kind, flux_operations::ConflictPolicy::Ask);
+    }
+
+    /// ⌘D — duplicate selected items in place ("name copy.ext").
+    pub fn duplicate_selected(&mut self) {
+        let items = self.actionable_paths();
+        if !items.is_empty() {
+            self.ops.submit(
+                OpKind::Duplicate { items },
+                flux_operations::ConflictPolicy::SkipAll,
+            );
+        }
+    }
+
     pub fn submit_trash(&mut self, items: Vec<PathBuf>) {
         if items.is_empty() {
             return;
@@ -626,6 +714,10 @@ impl FluxApp {
                 }
             }
         }
+        // Icon fetches finished → upload + repaint.
+        if self.icons.pump(ctx) > 0 {
+            ctx.request_repaint();
+        }
         // Search events.
         let mut got_hits = false;
         for ev in self.search_engine.drain_events() {
@@ -695,6 +787,7 @@ impl FluxApp {
                     self.pending_copy_text = Some(text);
                 }
             }
+            "duplicate" => self.duplicate_selected(),
             "open_terminal" => {
                 let p = self.current_path();
                 if let Err(e) = flux_platform::open_in_terminal(&p) {

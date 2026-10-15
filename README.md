@@ -70,6 +70,14 @@ Copy throughput (APFS, clonefile-capable `fs::copy` path): 1.4 GiB/s on
   with cancel in the status bar
 - Recursive search on demand (⌘F-mode toggle), command palette (⌘K)
 - fs watcher → debounced auto-refresh; settings persist across restarts
+- **Native OS file icons** (macOS/Windows via `file_icon_provider`), fetched
+  on a background worker, cached by extension — only visible rows trigger
+  fetches; painted glyphs are the fallback (and Linux default)
+- **Drag & drop**: rows drag onto folder rows / breadcrumbs / sidebar /
+  volumes to move (hold Option/Alt to copy) with a cursor ghost; drag out
+  of the window into Finder/other apps on macOS/Windows; drag files in
+  from the OS to copy them into the current folder
+- Duplicate (⌘D / context menu) → "name copy.ext" via the ops engine
 
 ## Known limitations (honest list)
 
@@ -81,7 +89,11 @@ Copy throughput (APFS, clonefile-capable `fs::copy` path): 1.4 GiB/s on
   fallback; it does not yet use `copy_file_range`/`sendfile` special-cases
   on Linux or `CopyFile2` flags on Windows.
 - No undo for file operations yet.
-- Icon rendering is painted glyphs, not OS-native file icons.
+- Dragging files **out** to the OS is macOS/Windows-only (`drag` crate's
+  Linux backend needs GTK, incompatible with winit). Icon fetching is
+  macOS/Windows-only for the same reason; Linux shows painted glyphs.
+- Drag-out preview shows the item's own contents when it's an image file;
+  other types may get a blank drag image on macOS.
 - Column widths don't persist yet.
 - No accessibility-tree audit beyond what egui/accesskit provides.
 

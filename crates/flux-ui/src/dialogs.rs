@@ -448,6 +448,15 @@ pub fn row_context_menu(app: &mut FluxApp, ui: &mut egui::Ui, items: &[PathBuf])
         app.clipboard.items = items.to_vec();
         app.clipboard.cut = true;
     }
+    if ui.button("Duplicate").clicked() {
+        ui.close();
+        app.ops.submit(
+            flux_operations::OpKind::Duplicate {
+                items: items.to_vec(),
+            },
+            flux_operations::ConflictPolicy::SkipAll,
+        );
+    }
     ui.separator();
     if ui.button("Rename…").clicked() {
         ui.close();

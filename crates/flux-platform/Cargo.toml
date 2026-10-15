@@ -14,5 +14,10 @@ fs2.workspace = true
 directories.workspace = true
 tracing.workspace = true
 
+# Native OS file icons. On Linux this would pull GTK stack — kept to
+# desktop targets where it uses NSWorkspace / SHGetFileInfo instead.
+[target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
+file_icon_provider = "1.0.2"
+
 [lints]
 workspace = true

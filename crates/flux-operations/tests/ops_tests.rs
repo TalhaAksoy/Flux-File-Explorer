@@ -372,3 +372,55 @@ fn engine_conflict_ask_pauses_for_answer() {
     assert_eq!(std::fs::read(dst_dir.join("same.txt")).unwrap(), b"OLD");
     assert!(dst_dir.join("same (2).txt").exists());
 }
+
+// ---------- duplicate ----------
+
+#[test]
+fn duplicate_creates_copy_with_suffix() {
+    let (_t, dir) = tmp();
+    let file = write_file(&dir, "report.txt", b"data");
+    let engine = OpEngine::new();
+    let id = engine.submit(
+        OpKind::Duplicate { items: vec![file] },
+        ConflictPolicy::Ask,
+    );
+    let p = wait_op(&engine, id, Duration::from_secs(10));
+    assert!(matches!(p.state, OpState::Done), "state: {:?}", p.state);
+    assert!(dir.join("report.txt").exists());
+    assert_eq!(std::fs::read(dir.join("report copy.txt")).unwrap(), b"data");
+}
+
+#[test]
+fn duplicate_increments_when_copy_exists() {
+    let (_t, dir) = tmp();
+    write_file(&dir, "a.txt", b"1");
+    write_file(&dir, "a copy.txt", b"x");
+    write_file(&dir, "a copy 2.txt", b"x");
+    let engine = OpEngine::new();
+    let id = engine.submit(
+        OpKind::Duplicate {
+            items: vec![dir.join("a.txt")],
+        },
+        ConflictPolicy::Ask,
+    );
+    wait_op(&engine, id, Duration::from_secs(10));
+    assert!(dir.join("a copy 3.txt").exists());
+}
+
+#[test]
+fn duplicate_dir_copies_tree() {
+    let (_t, dir) = tmp();
+    let src = dir.join("docs");
+    std::fs::create_dir(&src).unwrap();
+    write_file(&src, "inner.txt", b"i");
+    let engine = OpEngine::new();
+    let id = engine.submit(
+        OpKind::Duplicate { items: vec![src] },
+        ConflictPolicy::Ask,
+    );
+    wait_op(&engine, id, Duration::from_secs(10));
+    assert_eq!(
+        std::fs::read(dir.join("docs copy").join("inner.txt")).unwrap(),
+        b"i"
+    );
+}
