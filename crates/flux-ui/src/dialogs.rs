@@ -52,7 +52,7 @@ pub fn show(app: &mut FluxApp, ctx: &egui::Context) {
         Dialog::Rename { src, input } => {
             let src_c = src.clone();
             let mut do_rename = false;
-            card("Rename").fixed_size([360.0, 0.0]).show(ctx, |ui| {
+            card("Rename").default_width(360.0).show(ctx, |ui| {
                 heading(ui, "Rename");
                 ui.label(
                     egui::RichText::new(src_c.display().to_string())
@@ -62,7 +62,7 @@ pub fn show(app: &mut FluxApp, ctx: &egui::Context) {
                 ui.add_space(8.0);
                 let resp = ui.add(
                     egui::TextEdit::singleline(input)
-                        .desired_width(f32::INFINITY)
+                        .desired_width(320.0)
                         .font(egui::TextStyle::Heading),
                 );
                 resp.request_focus();
@@ -94,7 +94,7 @@ pub fn show(app: &mut FluxApp, ctx: &egui::Context) {
         }
         Dialog::NewFolder { input } => {
             let mut ok = false;
-            card("New Folder").fixed_size([360.0, 0.0]).show(ctx, |ui| {
+            card("New Folder").default_width(360.0).show(ctx, |ui| {
                 heading(ui, "New Folder");
                 ui.label(
                     egui::RichText::new(format!("in {}", cur_dir.display()))
@@ -104,7 +104,7 @@ pub fn show(app: &mut FluxApp, ctx: &egui::Context) {
                 ui.add_space(8.0);
                 let r = ui.add(
                     egui::TextEdit::singleline(input)
-                        .desired_width(f32::INFINITY)
+                        .desired_width(320.0)
                         .hint_text("Folder name"),
                 );
                 r.request_focus();
@@ -129,7 +129,7 @@ pub fn show(app: &mut FluxApp, ctx: &egui::Context) {
         }
         Dialog::NewFile { input } => {
             let mut ok = false;
-            card("New File").fixed_size([360.0, 0.0]).show(ctx, |ui| {
+            card("New File").default_width(360.0).show(ctx, |ui| {
                 heading(ui, "New File");
                 ui.label(
                     egui::RichText::new(format!("in {}", cur_dir.display()))
@@ -139,7 +139,7 @@ pub fn show(app: &mut FluxApp, ctx: &egui::Context) {
                 ui.add_space(8.0);
                 let r = ui.add(
                     egui::TextEdit::singleline(input)
-                        .desired_width(f32::INFINITY)
+                        .desired_width(320.0)
                         .hint_text("File name"),
                 );
                 r.request_focus();
@@ -165,7 +165,7 @@ pub fn show(app: &mut FluxApp, ctx: &egui::Context) {
         Dialog::ConfirmPermanentDelete { items } => {
             let n = items.len();
             let mut confirm = false;
-            card("Delete Permanently").fixed_size([380.0, 0.0]).show(ctx, |ui| {
+            card("Delete Permanently").default_width(380.0).show(ctx, |ui| {
                 heading(ui, "Delete Permanently?");
                 ui.add_space(4.0);
                 ui.label(format!(
@@ -208,7 +208,7 @@ pub fn show(app: &mut FluxApp, ctx: &egui::Context) {
         Dialog::ConfirmTrashUnsupported { items } => {
             let n = items.len();
             let mut yes = false;
-            card("Trash unavailable").fixed_size([380.0, 0.0]).show(ctx, |ui| {
+            card("Trash unavailable").default_width(380.0).show(ctx, |ui| {
                 heading(ui, "Trash Unavailable");
                 ui.add_space(4.0);
                 ui.label(format!(
@@ -257,7 +257,7 @@ pub fn show(app: &mut FluxApp, ctx: &egui::Context) {
             if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
                 decision = Some(ConflictAction::CancelOp);
             }
-            card("Item already exists").fixed_size([420.0, 0.0]).show(ctx, |ui| {
+            card("Item already exists").default_width(420.0).show(ctx, |ui| {
                 heading(ui, "Item Already Exists");
                 ui.add_space(4.0);
                 ui.label(
@@ -315,7 +315,7 @@ pub fn show(app: &mut FluxApp, ctx: &egui::Context) {
             });
         }
         Dialog::About => {
-            card("About Flux Files").fixed_size([300.0, 0.0]).show(ctx, |ui| {
+            card("About Flux Files").default_width(300.0).show(ctx, |ui| {
                 heading(ui, "Flux Files");
                 ui.label(
                     egui::RichText::new("A fast native file explorer")
@@ -399,7 +399,8 @@ fn bulk_rename_dialog(app: &mut FluxApp, br: &mut BulkRenameState, ctx: &egui::C
     let mut apply = false;
     card("Bulk Rename")
         .resizable(true)
-        .default_size([620.0, 460.0])
+        .default_size([560.0, 440.0])
+        .min_size([480.0, 320.0])
         .show(ctx, |ui| {
             heading(ui, "Bulk Rename");
             ui.label(
@@ -414,7 +415,7 @@ fn bulk_rename_dialog(app: &mut FluxApp, br: &mut BulkRenameState, ctx: &egui::C
             );
             ui.add_space(8.0);
             ui.columns(2, |cols| {
-                cols[0].set_min_width(220.0);
+                cols[0].set_min_width(208.0);
                 cols[0].vertical(|ui| {
                     ui.label(egui::RichText::new("Find").weak().small());
                     if ui
@@ -580,7 +581,7 @@ fn bulk_rename_dialog(app: &mut FluxApp, br: &mut BulkRenameState, ctx: &egui::C
 pub fn row_context_menu(app: &mut FluxApp, ui: &mut egui::Ui, items: &[PathBuf]) {
     use crate::format::MOD_KEY as CMD;
     use crate::menu as m;
-    m::begin(ui, 200.0);
+    m::begin(ui, 224.0);
     let single = items.len() == 1;
     let first = items.first().cloned();
     let single_dir = single && first.as_ref().is_some_and(|p| p.is_dir());
@@ -710,7 +711,7 @@ pub fn row_context_menu(app: &mut FluxApp, ui: &mut egui::Ui, items: &[PathBuf])
 pub fn bg_context_menu(app: &mut FluxApp, ui: &mut egui::Ui) {
     use crate::format::MOD_KEY as CMD;
     use crate::menu as m;
-    m::begin(ui, 190.0);
+    m::begin(ui, 200.0);
     if m::item_shortcut(ui, "New Folder…", &format!("Shift+{CMD}+N")).clicked() {
         ui.close();
         app.dialog = Dialog::NewFolder { input: String::new() };

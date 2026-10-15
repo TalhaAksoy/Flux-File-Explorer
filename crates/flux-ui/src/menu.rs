@@ -17,15 +17,18 @@ pub fn popup_frame(style: &Style) -> Frame {
 }
 
 /// Apply egui's flat menu styling + tight rhythm inside a menu Area.
-/// Call once at the top of the menu closure.
-pub fn begin(ui: &mut Ui, min_width: f32) {
+/// Call once at the top of the menu closure. `width` is a hard bound —
+/// inside an `Area`, `available_width` is the rest of the screen, so
+/// without clamping the menu would stretch to the window edge.
+pub fn begin(ui: &mut Ui, width: f32) {
     menu::menu_style(ui.style_mut());
     {
         let st = ui.style_mut();
         st.spacing.item_spacing = Vec2::new(0.0, 1.0);
         st.spacing.button_padding = Vec2::new(10.0, 5.0);
     }
-    ui.set_min_width(min_width);
+    ui.set_min_width(width);
+    ui.set_max_width(width);
 }
 
 /// Full-width flat menu item — rounded hover highlight, left-aligned label.
@@ -111,7 +114,8 @@ pub fn submenu<R>(
             st.spacing.item_spacing = Vec2::new(0.0, 1.0);
             st.spacing.button_padding = Vec2::new(10.0, 5.0);
         }
-        sub.set_min_width(160.0);
+        sub.set_min_width(170.0);
+        sub.set_max_width(190.0);
         add_contents(sub)
     });
     let _ = inner;
