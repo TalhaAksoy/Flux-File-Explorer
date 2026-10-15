@@ -219,6 +219,8 @@ pub fn toolbar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
 
 /// Left sidebar: places, bookmarks, volumes.
 pub fn sidebar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
+    // Taller rows — comfortable hit targets, the pill gets real padding.
+    ui.style_mut().spacing.interact_size.y = 28.0;
     ui.add_space(6.0);
     let pal = crate::theme::Palette::of(&ui.style().visuals);
     let current = app.current_path();

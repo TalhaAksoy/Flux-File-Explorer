@@ -150,18 +150,13 @@ pub fn icon_row(
         ui.allocate_exact_size(Vec2::new(w, h), egui::Sense::click());
     let pal = crate::theme::Palette::of(&ui.style().visuals);
     let hovered = resp.hovered() && !selected;
+    // Pill insets from the panel edge — the fill breathes around the
+    // row content rather than hugging the sidebar walls.
+    let pill = rect.shrink2(Vec2::new(4.0, 2.0));
     if selected {
-        ui.painter().rect_filled(
-            rect.shrink2(Vec2::new(2.0, 1.0)),
-            CornerRadius::same(6),
-            pal.surface_selected,
-        );
+        ui.painter().rect_filled(pill, CornerRadius::same(7), pal.surface_selected);
     } else if hovered {
-        ui.painter().rect_filled(
-            rect.shrink2(Vec2::new(2.0, 1.0)),
-            CornerRadius::same(6),
-            pal.surface_hover,
-        );
+        ui.painter().rect_filled(pill, CornerRadius::same(7), pal.surface_hover);
     }
     let text_col = if selected {
         pal.text_primary
@@ -169,15 +164,15 @@ pub fn icon_row(
         pal.text_secondary
     };
     let ir = Rect::from_center_size(
-        Pos2::new(rect.left() + h * 0.55, rect.center().y),
-        Vec2::splat(h * 0.62),
+        Pos2::new(rect.left() + h * 0.62, rect.center().y),
+        Vec2::splat(h * 0.56),
     );
     paint(ui.painter(), ir, if selected { pal.text_primary } else { text_col });
     ui.painter().text(
-        Pos2::new(rect.left() + h * 1.05, rect.center().y),
+        Pos2::new(rect.left() + h * 1.14, rect.center().y),
         egui::Align2::LEFT_CENTER,
         label,
-        egui::FontId::proportional(13.0),
+        egui::FontId::proportional(13.5),
         text_col,
     );
     resp
