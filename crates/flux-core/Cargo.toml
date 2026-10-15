@@ -1,0 +1,16 @@
+[package]
+name = "flux-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Filesystem model: entries, snapshots, streaming enumeration, sort/filter"
+
+[dependencies]
+rustc-hash.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

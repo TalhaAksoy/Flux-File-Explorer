@@ -1,0 +1,21 @@
+[package]
+name = "flux-operations"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Cancellable file operation engine: copy/move/rename/delete/trash/batch-rename"
+
+[dependencies]
+flux-core.workspace = true
+flux-platform.workspace = true
+filetime.workspace = true
+regex.workspace = true
+rustc-hash.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

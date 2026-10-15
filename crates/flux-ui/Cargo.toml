@@ -1,0 +1,22 @@
+[package]
+name = "flux-ui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "egui presentation layer for Flux Files"
+
+[dependencies]
+flux-core.workspace = true
+flux-platform.workspace = true
+flux-operations.workspace = true
+flux-search.workspace = true
+flux-settings.workspace = true
+egui.workspace = true
+egui_extras.workspace = true
+jiff.workspace = true
+rustc-hash.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

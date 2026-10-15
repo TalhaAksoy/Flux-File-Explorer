@@ -1,0 +1,18 @@
+[package]
+name = "flux-platform"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Platform adapters: open, trash, volumes, terminal, free space, watching"
+
+[dependencies]
+flux-core.workspace = true
+trash.workspace = true
+notify.workspace = true
+fs2.workspace = true
+directories.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

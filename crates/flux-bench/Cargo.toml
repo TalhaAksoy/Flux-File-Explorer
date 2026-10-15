@@ -1,0 +1,27 @@
+[package]
+name = "flux-bench"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Benchmark harness: dataset generation, enumeration/memory/view metrics"
+
+[[bin]]
+name = "flux-bench"
+path = "src/main.rs"
+
+[dependencies]
+flux-core.workspace = true
+flux-operations.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "core_benches"
+harness = false
+
+[lints]
+workspace = true
