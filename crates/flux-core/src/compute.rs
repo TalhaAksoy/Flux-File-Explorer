@@ -47,18 +47,48 @@ impl ComputeEngine {
                         job = newer;
                     }
                     let gen_id = job.gen_id;
-                    let ok = match job.snap.write() {
-                        Ok(mut s) if s.generation == gen_id => {
+                    // 1. Capture inputs under a READ lock — concurrent with
+                    //    UI readers, so rendering never stalls on us.
+                    let inputs = match job.snap.read() {
+                        Ok(s) if s.generation == gen_id => Some((
+                            s.entries().to_vec(),
+                            s.sort,
+                            s.filter.clone(),
+                            s.show_hidden,
+                            s.version(),
+                        )),
+                        _ => None,
+                    };
+                    // 2. Sort/filter OUTSIDE any lock — this is the
+                    //    expensive part and it must not hold a write lock
+                    //    that blocks UI snapshot reads.
+                    let ok = match inputs {
+                        Some((entries, sort, filter, show_hidden, version)) => {
                             let view = build_view(
-                                s.entries(),
-                                &s.sort,
-                                s.filter.as_deref(),
-                                s.show_hidden,
+                                &entries,
+                                &sort,
+                                filter.as_deref(),
+                                show_hidden,
                             );
-                            s.set_view(view);
-                            true
+                            // 3. Apply under a short WRITE lock, re-checking
+                            //    every input that could have changed while we
+                            //    computed (entries appended → version bumps;
+                            //    sort/filter edits are compared directly).
+                            match job.snap.write() {
+                                Ok(mut s)
+                                    if s.generation == gen_id
+                                        && s.version() == version
+                                        && s.sort == sort
+                                        && s.filter == filter
+                                        && s.show_hidden == show_hidden =>
+                                {
+                                    s.set_view(view);
+                                    true
+                                }
+                                _ => false,
+                            }
                         }
-                        _ => false,
+                        None => false,
                     };
                     let _ = ev_tx.send(if ok {
                         ComputeEvent::ViewReady { gen_id }

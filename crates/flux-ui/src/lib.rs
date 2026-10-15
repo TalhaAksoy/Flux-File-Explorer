@@ -448,7 +448,7 @@ impl FluxApp {
                     }
             });
         if let Some(id) = run {
-            self.run_command(id);
+            self.run_command(id, ctx);
             close = true;
         }
         if ctx.input(|i| i.key_pressed(Key::Escape)) || close {
@@ -462,6 +462,7 @@ impl eframe::App for FluxApp {
     /// Non-UI work: drain engine events, watcher, op events.
     /// Called every frame (and on wakeups) before `ui`.
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.sync_system_theme(ctx);
         self.pump(ctx);
     }
 
@@ -849,8 +850,7 @@ impl eframe::App for FluxApp {
             self.density = self.density.next();
         }
         if act.toggle_theme {
-            self.dark = !self.dark;
-            theme::apply_theme(&ctx, self.dark);
+            self.toggle_theme(&ctx);
         }
         if let Some(id) = act.cancel_op {
             self.ops.cancel(id);
@@ -923,6 +923,9 @@ pub fn run(start_dir: Option<PathBuf>) -> eframe::Result<()> {
                 app.navigate(d);
             }
             cc.egui_ctx.set_fonts(theme::load_system_fonts());
+            if app.settings.theme == flux_settings::Theme::System {
+                app.dark = matches!(cc.egui_ctx.system_theme(), Some(egui::Theme::Dark));
+            }
             theme::apply_theme(&cc.egui_ctx, app.dark);
             Ok(Box::new(app))
         }),

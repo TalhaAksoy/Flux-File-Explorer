@@ -68,7 +68,6 @@ fn write_entry(
         zw.start_file(&name, opts()).map_err(io::Error::other)?;
         let mut f = File::open(path)?;
         let mut buf = vec![0u8; CHUNK];
-        let mut wrote = 0u64;
         loop {
             if cancelled(c) {
                 return Ok(());
@@ -78,12 +77,11 @@ fn write_entry(
                 break;
             }
             io::Write::write_all(&mut *zw, &buf[..n])?;
-            wrote += n as u64;
             if let Ok(mut p) = c.progress.lock() {
                 p.done_bytes += n as u64;
             }
         }
-        tick_item(c, path, wrote);
+        tick_item(c, path);
     }
     Ok(())
 }

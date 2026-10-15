@@ -12,8 +12,12 @@ use std::sync::{Arc, Mutex, RwLock, mpsc};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
+use rustc_hash::FxHashSet;
+
 use crate::conflict::{ConflictAction, ConflictDecision, ConflictPolicy, ConflictQuery};
-use crate::copy::{CopyCtx, cancelled, cleanup_created, copy_tree, discover, remove_tree};
+use crate::copy::{
+    CopyCtx, cancelled, cleanup_created, copy_tree, discover, move_item, remove_tree,
+};
 use crate::progress::{OpProgress, OpState};
 use crate::rename::{RenameAction, execute_renames};
 
@@ -338,6 +342,7 @@ fn run_job(
                 resolve: &resolver,
                 tag: job.id,
                 created_dirs: Mutex::new(Vec::new()),
+                failed: Mutex::new(FxHashSet::default()),
             };
             discover(&ctx, sources);
             if cancelled(&ctx) {
@@ -352,29 +357,28 @@ fn run_job(
                     continue;
                 };
                 let dst = dest_dir.join(name);
-                // Move: same-volume rename first — atomic and instant.
-                if is_move
-                    && std::fs::rename(src, &dst).is_ok()
-                {
-                    if let Ok(mut p) = ctx.progress.lock() {
-                        p.done_items += 1;
+                if is_move {
+                    // Conflict policy is applied inside move_item BEFORE any
+                    // rename — nothing is silently overwritten. Same-volume
+                    // moves stay atomic; cross-volume moves copy then remove
+                    // only the parts of the source that actually transferred.
+                    match move_item(src, &dst, &ctx) {
+                        Ok(crate::copy::ItemOutcome::Done)
+                        | Ok(crate::copy::ItemOutcome::Partial) => {}
+                        Ok(crate::copy::ItemOutcome::Skipped)
+                        | Ok(crate::copy::ItemOutcome::Cancelled) => {}
+                        Err(e) => {
+                            crate::copy::note_error(&ctx, format!("{}: {e}", src.display()))
+                        }
                     }
                     dirty(ev_tx);
                     continue;
                 }
                 match copy_tree(src, &dst, &ctx) {
-                    Ok(crate::copy::ItemOutcome::Done) => {
-                        if is_move {
-                            // Copy verified per-file by size; remove source.
-                            if let Err(e) = remove_tree(src, &ctx) {
-                                crate::copy::note_error(
-                                    &ctx,
-                                    format!("cleanup {}: {e}", src.display()),
-                                );
-                            }
-                        }
-                    }
-                    Ok(crate::copy::ItemOutcome::Skipped) | Ok(crate::copy::ItemOutcome::Cancelled) => {}
+                    Ok(crate::copy::ItemOutcome::Done)
+                    | Ok(crate::copy::ItemOutcome::Partial)
+                    | Ok(crate::copy::ItemOutcome::Skipped)
+                    | Ok(crate::copy::ItemOutcome::Cancelled) => {}
                     Err(e) => crate::copy::note_error(&ctx, format!("{}: {e}", src.display())),
                 }
                 dirty(ev_tx);
@@ -391,6 +395,7 @@ fn run_job(
                 resolve: &resolver,
                 tag: job.id,
                 created_dirs: Mutex::new(Vec::new()),
+                failed: Mutex::new(FxHashSet::default()),
             };
             discover(&ctx, items);
             if cancelled(&ctx) {
@@ -404,6 +409,7 @@ fn run_job(
                 let dst = crate::copy::duplicate_dst(src);
                 match copy_tree(src, &dst, &ctx) {
                     Ok(crate::copy::ItemOutcome::Done)
+                    | Ok(crate::copy::ItemOutcome::Partial)
                     | Ok(crate::copy::ItemOutcome::Skipped)
                     | Ok(crate::copy::ItemOutcome::Cancelled) => {}
                     Err(e) => crate::copy::note_error(&ctx, format!("{}: {e}", src.display())),
@@ -419,6 +425,7 @@ fn run_job(
                 resolve: &resolver,
                 tag: job.id,
                 created_dirs: Mutex::new(Vec::new()),
+                failed: Mutex::new(FxHashSet::default()),
             };
             discover(&ctx, items);
             if cancelled(&ctx) {
@@ -473,6 +480,7 @@ fn run_job(
                 resolve: &resolver,
                 tag: job.id,
                 created_dirs: Mutex::new(Vec::new()),
+                failed: Mutex::new(FxHashSet::default()),
             };
             discover(&ctx, items);
             if cancelled(&ctx) {
@@ -504,7 +512,14 @@ fn run_job(
                     }
                 }
             }
-            match std::fs::rename(from, to) {
+            // If we got here with `to` still existing the user chose
+            // overwrite — swap-protect it so a failed rename can't lose
+            // the destination (and so Windows can replace at all).
+            match if to.symlink_metadata().is_ok() {
+                crate::copy::rename_replace(from, to)
+            } else {
+                std::fs::rename(from, to)
+            } {
                 Ok(()) => {
                     let mut p = op.progress.lock().unwrap();
                     p.total_items = 1;
@@ -521,6 +536,7 @@ fn run_job(
                 resolve: &resolver,
                 tag: job.id,
                 created_dirs: Mutex::new(Vec::new()),
+                failed: Mutex::new(FxHashSet::default()),
             };
             execute_renames(actions, &ctx);
         }

@@ -15,12 +15,18 @@ pub struct WatchEvent {
     pub path: PathBuf,
 }
 
+/// Shared `Option<callback>` the notify thread invokes on each raw event.
+type WakeSlot = std::sync::Arc<std::sync::Mutex<Option<Box<dyn Fn() + Send + Sync>>>>;
+
 pub struct FsWatcher {
     watcher: Option<notify::RecommendedWatcher>,
     rx: mpsc::Receiver<PathBuf>,
     watching: Option<PathBuf>,
     /// First undelivered change; delivered once the debounce window passes.
     pending_since: Option<Instant>,
+    /// Wakes the UI when a raw event lands (e.g. `ctx.request_repaint`).
+    /// Shared with the notify callback, which runs on notify's thread.
+    wake: WakeSlot,
 }
 
 const DEBOUNCE: Duration = Duration::from_millis(250);
@@ -48,11 +54,16 @@ impl Default for FsWatcher {
 impl FsWatcher {
     pub fn new() -> Self {
         let (tx, rx) = mpsc::channel::<PathBuf>();
+        let wake = WakeSlot::default();
+        let wake2 = wake.clone();
         let watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
             if let Ok(ev) = res
                 && is_content_change(&ev.kind)
                 && let Some(p) = ev.paths.first() {
                     let _ = tx.send(p.clone());
+                    if let Some(w) = wake2.lock().unwrap().as_ref() {
+                        w();
+                    }
                 }
         });
         Self {
@@ -60,7 +71,21 @@ impl FsWatcher {
             rx,
             watching: None,
             pending_since: None,
+            wake,
         }
+    }
+
+    /// Install a callback invoked (from notify's thread) when any raw event
+    /// arrives — typically `ctx.request_repaint` so an idle UI wakes up to
+    /// observe the change instead of noticing it on the next random frame.
+    pub fn set_wake(&mut self, f: impl Fn() + Send + Sync + 'static) {
+        *self.wake.lock().unwrap() = Some(Box::new(f));
+    }
+
+    /// A change is inside the debounce window — the UI should repaint soon
+    /// so [`poll_changed`](Self::poll_changed) gets polled again at expiry.
+    pub fn pending(&self) -> bool {
+        self.pending_since.is_some()
     }
 
     /// True when the platform watcher could not be created.

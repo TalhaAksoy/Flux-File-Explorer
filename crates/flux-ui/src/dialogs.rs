@@ -305,12 +305,12 @@ pub fn show(app: &mut FluxApp, ctx: &egui::Context) {
         Dialog::BulkRename(br) => {
             bulk_rename_dialog(app, br, ctx, &mut close);
         }
-        Dialog::Properties { path } => {
+        Dialog::Properties { path, meta } => {
             let p = path.clone();
             card("Properties").resizable(true).min_size([340.0, 0.0]).show(ctx, |ui| {
                 heading(ui, "Properties");
                 ui.add_space(6.0);
-                properties_body(ui, &p);
+                properties_body(ui, &p, meta, ctx);
                 let (_p, cancel) = footer(ui, "Close", true);
                 if _p || cancel {
                     close = true;
@@ -344,8 +344,31 @@ pub fn show(app: &mut FluxApp, ctx: &egui::Context) {
     }
 }
 
-fn properties_body(ui: &mut egui::Ui, path: &std::path::Path) {
-    let md = std::fs::metadata(path);
+/// Async slot for the Properties dialog's metadata — `None` while the
+/// background stat is in flight.
+pub type PropsMeta =
+    std::sync::Arc<std::sync::Mutex<Option<Result<std::fs::Metadata, String>>>>;
+
+fn properties_body(
+    ui: &mut egui::Ui,
+    path: &std::path::Path,
+    meta: &mut Option<PropsMeta>,
+    ctx: &egui::Context,
+) {
+    // Kick off the stat once; the worker wakes the UI when it lands.
+    let slot = meta.get_or_insert_with(|| {
+        let slot = PropsMeta::default();
+        let s2 = slot.clone();
+        let p = path.to_path_buf();
+        let c2 = ctx.clone();
+        std::thread::spawn(move || {
+            let r = std::fs::metadata(&p).map_err(|e| e.to_string());
+            *s2.lock().unwrap() = Some(r);
+            c2.request_repaint();
+        });
+        slot
+    });
+    let md = slot.lock().unwrap().clone();
     egui::Grid::new("props").num_columns(2).show(ui, |ui| {
         ui.label("Name");
         ui.label(
@@ -357,20 +380,32 @@ fn properties_body(ui: &mut egui::Ui, path: &std::path::Path) {
         ui.label("Path");
         ui.label(path.display().to_string());
         ui.end_row();
-        if let Ok(md) = &md {
-            ui.label("Size");
-            ui.label(if md.is_dir() {
-                "—".to_string()
-            } else {
-                format_size(md.len())
-            });
-            ui.end_row();
-            ui.label("Modified");
-            ui.label(crate::format::format_mtime(md.modified().ok()));
-            ui.end_row();
-            ui.label("Read-only");
-            ui.label(if md.permissions().readonly() { "Yes" } else { "No" });
-            ui.end_row();
+        match &md {
+            None => {
+                ui.label("…");
+                ui.weak("Reading metadata…");
+                ui.end_row();
+            }
+            Some(Ok(md)) => {
+                ui.label("Size");
+                ui.label(if md.is_dir() {
+                    "—".to_string()
+                } else {
+                    format_size(md.len())
+                });
+                ui.end_row();
+                ui.label("Modified");
+                ui.label(crate::format::format_mtime(md.modified().ok()));
+                ui.end_row();
+                ui.label("Read-only");
+                ui.label(if md.permissions().readonly() { "Yes" } else { "No" });
+                ui.end_row();
+            }
+            Some(Err(e)) => {
+                ui.label("Error");
+                ui.label(e);
+                ui.end_row();
+            }
         }
     });
 }
@@ -700,7 +735,7 @@ pub fn row_context_menu(app: &mut FluxApp, ui: &mut egui::Ui, items: &[PathBuf])
         && let Some(p) = first.clone()
             && m::item(ui, "Properties").clicked() {
                 ui.close();
-                app.dialog = Dialog::Properties { path: p };
+                app.dialog = Dialog::Properties { path: p, meta: None };
             }
 }
 
@@ -782,6 +817,7 @@ pub fn bg_context_menu(app: &mut FluxApp, ui: &mut egui::Ui) {
         ui.close();
         app.dialog = Dialog::Properties {
             path: app.current_path(),
+            meta: None,
         };
     }
 }

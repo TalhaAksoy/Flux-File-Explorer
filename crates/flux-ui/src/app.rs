@@ -34,7 +34,12 @@ pub enum Dialog {
     ConfirmTrashUnsupported { items: Vec<PathBuf> },
     Conflict { query: ConflictQuery, apply_all: bool },
     BulkRename(BulkRenameState),
-    Properties { path: PathBuf },
+    Properties {
+        path: PathBuf,
+        /// Filled by a background stat so the dialog never blocks the UI
+        /// thread on slow/network filesystems.
+        meta: Option<crate::dialogs::PropsMeta>,
+    },
     About,
 }
 
@@ -216,6 +221,8 @@ pub struct FluxApp {
     pub last_gc: Instant,
     /// Op ids whose failure was already toasted — report once, not per frame.
     pub reported_ops: rustc_hash::FxHashSet<u64>,
+    /// Whether the filesystem watcher has been handed a wake callback yet.
+    pub wake_installed: bool,
 }
 
 /// An in-flight drag of file rows.
@@ -303,6 +310,7 @@ impl FluxApp {
             last_watch_hit: None,
             last_gc: Instant::now(),
             reported_ops: rustc_hash::FxHashSet::default(),
+            wake_installed: false,
         }
     }
 
@@ -563,12 +571,20 @@ impl FluxApp {
     }
 
     pub fn submit_copy(&mut self, dest: PathBuf) {
-        let items = std::mem::take(&mut self.clipboard.items);
+        // Copy once → paste many times: only a Cut empties the clipboard
+        // after the operation is submitted (Explorer semantics).
         let cut = self.clipboard.cut;
+        let items = if cut {
+            std::mem::take(&mut self.clipboard.items)
+        } else {
+            self.clipboard.items.clone()
+        };
         if items.is_empty() {
             return;
         }
-        self.clipboard.cut = false;
+        if cut {
+            self.clipboard.cut = false;
+        }
         let kind = if cut {
             OpKind::Move {
                 sources: items,
@@ -767,9 +783,18 @@ impl FluxApp {
                 ctx.request_repaint();
             }
         }
-        // Watcher debounce → refresh current dir.
+        // Watcher debounce → refresh current dir. The watcher also wakes
+        // the UI directly so an idle app notices external changes; while a
+        // debounce is pending we schedule a repaint at its expiry.
+        if !self.wake_installed {
+            let c = ctx.clone();
+            self.watcher.set_wake(move || c.request_repaint());
+            self.wake_installed = true;
+        }
         if self.watcher.poll_changed() {
             self.refresh();
+        } else if self.watcher.pending() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(100));
         }
         // Op events.
         let mut dirty = false;
@@ -836,7 +861,35 @@ impl FluxApp {
         }
     }
 
-    pub fn run_command(&mut self, id: &str) {
+    /// Flip to an explicit light/dark theme (drops System following) and
+    /// persist the choice — previously the toggle never reached settings,
+    /// so restarts silently reverted.
+    pub fn toggle_theme(&mut self, ctx: &egui::Context) {
+        self.settings.theme = if self.dark {
+            flux_settings::Theme::Light
+        } else {
+            flux_settings::Theme::Dark
+        };
+        self.dark = !self.dark;
+        let _ = flux_settings::save(&self.settings);
+        crate::theme::apply_theme(ctx, self.dark);
+    }
+
+    /// While the theme preference is System, follow the OS: egui keeps a
+    /// cached `system_theme` updated by the OS (no polling on our side).
+    /// Call once per frame; a change is applied immediately.
+    pub fn sync_system_theme(&mut self, ctx: &egui::Context) {
+        if self.settings.theme != flux_settings::Theme::System {
+            return;
+        }
+        let dark = matches!(ctx.system_theme(), Some(egui::Theme::Dark));
+        if dark != self.dark {
+            self.dark = dark;
+            crate::theme::apply_theme(ctx, dark);
+        }
+    }
+
+    pub fn run_command(&mut self, id: &str, ctx: &egui::Context) {
         match id {
             "go_home" => self.navigate(flux_platform::home_dir()),
             "new_tab" => self.new_tab(),
@@ -892,7 +945,7 @@ impl FluxApp {
                 }
             }
             "toggle_density" => self.density = self.density.next(),
-            "toggle_theme" => self.dark = !self.dark,
+            "toggle_theme" => self.toggle_theme(ctx),
             _ => {}
         }
     }

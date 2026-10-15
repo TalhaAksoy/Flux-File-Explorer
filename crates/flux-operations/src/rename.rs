@@ -11,7 +11,7 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 use crate::conflict::validate_filename;
-use crate::copy::{CopyCtx, ItemOutcome, cancelled, note_error};
+use crate::copy::{CopyCtx, cancelled, note_error};
 
 #[derive(Clone, Debug)]
 pub enum RenameRule {
@@ -262,9 +262,21 @@ pub fn plan_renames(sources: &[PathBuf], rules: &[RenameRule]) -> Vec<RenameActi
     out
 }
 
+/// A `.fluxstage-*` sibling name that is currently free, so staging a file
+/// can never overwrite a leftover from a crashed run (or a user file that
+/// happens to match the pattern).
 fn staging_path(dst: &Path, tag: u64, i: usize) -> PathBuf {
+    for n in 0..100u32 {
+        let mut name = OsString::from(".fluxstage-");
+        name.push(format!("{tag}-{i}-{n}"));
+        let p = dst.with_file_name(name);
+        if p.symlink_metadata().is_err() {
+            return p;
+        }
+    }
+    // Should be unreachable; fall back to a PID-suffixed name.
     let mut name = OsString::from(".fluxstage-");
-    name.push(format!("{tag}-{i}"));
+    name.push(format!("{}-{}-{}", tag, i, std::process::id()));
     dst.with_file_name(name)
 }
 
@@ -309,13 +321,26 @@ pub fn execute_renames(actions: &[RenameAction], c: &CopyCtx<'_>) {
             }
         }
     }
-    // Pass 2: staged temps → final targets (targets are free now).
+    finish_staged(&staged, c);
+}
+
+/// Pass 2: staged temps → final targets (targets are free by now).
+/// On cancel every leftover mapping is reported so the user can recover
+/// the `.fluxstage-*` files by hand — sources can't be blindly restored
+/// because their names may already have been reused.
+#[doc(hidden)]
+pub fn finish_staged(staged: &[(PathBuf, PathBuf)], c: &CopyCtx<'_>) {
     for (tmp, dst) in staged {
         if cancelled(c) {
-            // Move remaining temps back to their original names? We can't know
-            // the src here reliably (src may itself have been renamed). Leave
-            // temps; their .fluxstage-* names are explicit and recoverable.
-            return;
+            note_error(
+                c,
+                format!(
+                    "cancelled: {} left staged (intended {})",
+                    tmp.display(),
+                    dst.display()
+                ),
+            );
+            continue;
         }
         if dst.exists() || dst.symlink_metadata().is_ok() {
             note_error(
@@ -328,7 +353,7 @@ pub fn execute_renames(actions: &[RenameAction], c: &CopyCtx<'_>) {
             );
             continue;
         }
-        match std::fs::rename(&tmp, &dst) {
+        match std::fs::rename(tmp, dst) {
             Ok(()) => {
                 if let Ok(mut p) = c.progress.lock() {
                     p.done_items += 1;
@@ -337,5 +362,4 @@ pub fn execute_renames(actions: &[RenameAction], c: &CopyCtx<'_>) {
             Err(e) => note_error(c, format!("rename {}: {e}", dst.display())),
         }
     }
-    let _ = ItemOutcome::Done;
 }

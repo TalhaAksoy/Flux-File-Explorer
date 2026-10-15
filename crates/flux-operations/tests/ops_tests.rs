@@ -32,6 +32,7 @@ fn noop_ctx<'a>(
         resolve: &|_s, _d| ConflictAction::Overwrite,
         tag: 1,
         created_dirs: Mutex::new(Vec::new()),
+        failed: Mutex::new(Default::default()),
     }
 }
 
