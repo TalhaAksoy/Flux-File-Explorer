@@ -14,6 +14,7 @@ flux-search.workspace = true
 flux-settings.workspace = true
 egui.workspace = true
 egui_extras.workspace = true
+eframe.workspace = true
 jiff.workspace = true
 rustc-hash.workspace = true
 tracing.workspace = true
