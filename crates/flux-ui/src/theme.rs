@@ -84,7 +84,7 @@ pub fn sidebar_fill(dark: bool) -> Color32 {
 }
 
 pub fn apply_theme(ctx: &egui::Context, dark: bool) {
-    let visuals = if dark {
+    let mut visuals = if dark {
         let mut v = Visuals::dark();
         v.panel_fill = Color32::from_rgb(26, 27, 31);
         v.window_fill = Color32::from_rgb(31, 33, 38);
@@ -97,29 +97,53 @@ pub fn apply_theme(ctx: &egui::Context, dark: bool) {
         // Softer widget outlines — field borders shouldn't scream.
         v.widgets.noninteractive.bg_stroke =
             Stroke::new(1.0, Color32::from_rgb(54, 56, 63));
+        // Translucent accent selection — modern tint, not a solid slab.
+        v.selection.bg_fill = Color32::from_rgb(80, 140, 255).gamma_multiply(0.28);
         v
     } else {
         let mut v = Visuals::light();
         v.panel_fill = Color32::from_rgb(247, 248, 250);
         v.window_fill = Color32::from_rgb(252, 253, 255);
         v.extreme_bg_color = Color32::from_rgb(238, 240, 244);
-        v.selection.bg_fill = Color32::from_rgb(205, 222, 250);
+        v.selection.bg_fill = Color32::from_rgb(60, 115, 220).gamma_multiply(0.16);
         v.selection.stroke = Stroke::new(1.0, Color32::from_rgb(60, 115, 220));
         v.widgets.noninteractive.bg_stroke =
             Stroke::new(1.0, Color32::from_rgb(219, 222, 229));
         v
+    };
+    // Floating surfaces: rounded, softly shadowed — the 2025 desktop look.
+    visuals.menu_corner_radius = CornerRadius::same(10);
+    visuals.window_corner_radius = CornerRadius::same(12);
+    visuals.popup_shadow = egui::Shadow {
+        offset: [0, 6],
+        blur: 20,
+        spread: 0,
+        color: Color32::from_black_alpha(if dark { 90 } else { 40 }),
+    };
+    visuals.window_shadow = egui::Shadow {
+        offset: [0, 10],
+        blur: 32,
+        spread: 0,
+        color: Color32::from_black_alpha(if dark { 110 } else { 55 }),
     };
     let mut style = Style {
         visuals,
         ..Style::default()
     };
     // Tighter, denser defaults — this is a productivity tool.
-    style.spacing.item_spacing = egui::vec2(6.0, 4.0);
-    style.spacing.button_padding = egui::vec2(8.0, 3.0);
-    style.spacing.menu_margin = egui::Margin::same(6);
-    style.visuals.widgets.inactive.corner_radius = CornerRadius::same(4);
-    style.visuals.widgets.hovered.corner_radius = CornerRadius::same(4);
-    style.visuals.widgets.active.corner_radius = CornerRadius::same(4);
+    style.spacing.item_spacing = egui::vec2(7.0, 5.0);
+    style.spacing.button_padding = egui::vec2(10.0, 4.0);
+    style.spacing.menu_margin = egui::Margin::same(7);
+    style.spacing.scroll = egui::style::ScrollStyle::floating();
+    for w in [
+        &mut style.visuals.widgets.inactive,
+        &mut style.visuals.widgets.hovered,
+        &mut style.visuals.widgets.active,
+        &mut style.visuals.widgets.open,
+        &mut style.visuals.widgets.noninteractive,
+    ] {
+        w.corner_radius = CornerRadius::same(6);
+    }
     let theme = if dark { egui::Theme::Dark } else { egui::Theme::Light };
     ctx.set_style_of(theme, style);
     ctx.set_theme(theme);

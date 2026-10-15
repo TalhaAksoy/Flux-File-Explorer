@@ -11,6 +11,7 @@ pub mod dialogs;
 pub mod format;
 pub mod glyphs;
 pub mod icon_cache;
+pub mod menu;
 pub mod pane;
 pub mod theme;
 pub mod view;
@@ -542,10 +543,10 @@ impl eframe::App for FluxApp {
             let items = self.actionable_paths();
             let inner = egui::Area::new(egui::Id::new("row_ctx"))
                 .order(egui::Order::Foreground)
+                .kind(egui::UiKind::Menu)
                 .fixed_pos(pos)
                 .show(&ctx, |ui| {
-                    egui::Frame::popup(ui.style()).show(ui, |ui| {
-                        ui.set_min_width(160.0);
+                    menu::popup_frame(ui.style()).show(ui, |ui| {
                         dialogs::row_context_menu(self, ui, &items);
                     });
                 });
@@ -572,10 +573,10 @@ impl eframe::App for FluxApp {
         if let Some(pos) = self.bg_menu_pos {
             let inner = egui::Area::new(egui::Id::new("bg_ctx"))
                 .order(egui::Order::Foreground)
+                .kind(egui::UiKind::Menu)
                 .fixed_pos(pos)
                 .show(&ctx, |ui| {
-                    egui::Frame::popup(ui.style()).show(ui, |ui| {
-                        ui.set_min_width(170.0);
+                    menu::popup_frame(ui.style()).show(ui, |ui| {
                         dialogs::bg_context_menu(self, ui);
                     });
                 });
