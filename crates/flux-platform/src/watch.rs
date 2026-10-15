@@ -34,11 +34,10 @@ impl FsWatcher {
     pub fn new() -> Self {
         let (tx, rx) = mpsc::channel::<PathBuf>();
         let watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
-            if let Ok(ev) = res {
-                if let Some(p) = ev.paths.first() {
+            if let Ok(ev) = res
+                && let Some(p) = ev.paths.first() {
                     let _ = tx.send(p.clone());
                 }
-            }
         });
         Self {
             watcher: watcher.ok(),
@@ -59,11 +58,10 @@ impl FsWatcher {
             return;
         }
         self.unwatch();
-        if let Some(w) = self.watcher.as_mut() {
-            if w.watch(dir, RecursiveMode::NonRecursive).is_ok() {
+        if let Some(w) = self.watcher.as_mut()
+            && w.watch(dir, RecursiveMode::NonRecursive).is_ok() {
                 self.watching = Some(dir.to_path_buf());
             }
-        }
     }
 
     pub fn unwatch(&mut self) {

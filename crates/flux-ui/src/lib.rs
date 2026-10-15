@@ -348,11 +348,10 @@ impl FluxApp {
                 if ui.input(|i| i.key_pressed(Key::ArrowUp)) {
                     self.palette_sel = self.palette_sel.saturating_sub(1);
                 }
-                if ui.input(|i| i.key_pressed(Key::Enter)) {
-                    if let Some(c) = matches.get(self.palette_sel) {
+                if ui.input(|i| i.key_pressed(Key::Enter))
+                    && let Some(c) = matches.get(self.palette_sel) {
                         run = Some(c.id);
                     }
-                }
             });
         if let Some(id) = run {
             self.run_command(id);

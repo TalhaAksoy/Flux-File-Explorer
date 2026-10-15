@@ -50,8 +50,8 @@ pub fn reveal_path(path: &Path) -> io::Result<()> {
 /// Open a terminal emulator rooted at `dir`. Configurable via
 /// `FLUX_TERMINAL` (command name/path); otherwise platform defaults.
 pub fn open_in_terminal(dir: &Path) -> io::Result<()> {
-    if let Ok(custom) = std::env::var("FLUX_TERMINAL") {
-        if !custom.is_empty() {
+    if let Ok(custom) = std::env::var("FLUX_TERMINAL")
+        && !custom.is_empty() {
             // Custom terminal: split "cmd args" cheaply on first space.
             let (bin, args) = match custom.split_once(' ') {
                 Some((b, rest)) => (b.to_string(), vec![rest.to_string()]),
@@ -63,7 +63,6 @@ pub fn open_in_terminal(dir: &Path) -> io::Result<()> {
                 .spawn()
                 .map(|_| ());
         }
-    }
     platform_terminal(dir)
 }
 

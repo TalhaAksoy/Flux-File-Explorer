@@ -250,11 +250,10 @@ fn enumeration_error_surfaces_as_failed_state() {
     let mut failed = false;
     while Instant::now() < deadline {
         for ev in engine.drain_events() {
-            if let EnumEvent::Error { gen_id: g, .. } = ev {
-                if g == gen_id {
+            if let EnumEvent::Error { gen_id: g, .. } = ev
+                && g == gen_id {
                     failed = true;
                 }
-            }
         }
         if failed {
             break;

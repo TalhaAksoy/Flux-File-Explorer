@@ -64,8 +64,7 @@ impl Palette {
 }
 
 pub fn apply_theme(ctx: &egui::Context, dark: bool) {
-    let mut style = Style::default();
-    style.visuals = if dark {
+    let visuals = if dark {
         let mut v = Visuals::dark();
         v.panel_fill = Color32::from_rgb(26, 27, 31);
         v.window_fill = Color32::from_rgb(31, 33, 38);
@@ -84,6 +83,10 @@ pub fn apply_theme(ctx: &egui::Context, dark: bool) {
         v.selection.bg_fill = Color32::from_rgb(205, 222, 250);
         v.selection.stroke = Stroke::new(1.0, Color32::from_rgb(60, 115, 220));
         v
+    };
+    let mut style = Style {
+        visuals,
+        ..Style::default()
     };
     // Tighter, denser defaults — this is a productivity tool.
     style.spacing.item_spacing = egui::vec2(6.0, 4.0);

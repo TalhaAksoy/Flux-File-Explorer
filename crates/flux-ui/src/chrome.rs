@@ -280,12 +280,11 @@ pub fn status_bar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) 
             ui.weak(format!("{} free", format_size(fs.available)));
         }
         // Toast.
-        if let Some((msg, t)) = &app.status_msg {
-            if t.elapsed() < std::time::Duration::from_secs(6) {
+        if let Some((msg, t)) = &app.status_msg
+            && t.elapsed() < std::time::Duration::from_secs(6) {
                 ui.weak("·");
                 ui.label(egui::RichText::new(msg).italics());
             }
-        }
         // Active op progress on the right.
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             for op in app.ops.active_ops() {

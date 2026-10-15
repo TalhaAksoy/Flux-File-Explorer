@@ -146,7 +146,7 @@ fn run_search(job: &Job, ev_tx: &mpsc::SyncSender<SearchEvent>, cur_gen: &Arc<At
     let mut checks = 0usize;
 
     while let Some((dir, depth)) = stack.pop() {
-        if checks % 256 == 0 && !is_current() {
+        if checks.is_multiple_of(256) && !is_current() {
             let _ = ev_tx.try_send(SearchEvent::Done {
                 gen_id,
                 total,

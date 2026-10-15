@@ -119,8 +119,8 @@ pub fn file_table(app: &mut FluxApp, ui: &mut egui::Ui) -> RowAction {
 
     // Empty / failed state occupies the area (except while streaming, where
     // partial rows still show).
-    if let Some(msg) = &state_label {
-        if !loading || view_len == 0 {
+    if let Some(msg) = &state_label
+        && (!loading || view_len == 0) {
             ui.add_space(50.0);
             ui.vertical_centered(|ui| {
                 if loading {
@@ -133,7 +133,6 @@ pub fn file_table(app: &mut FluxApp, ui: &mut egui::Ui) -> RowAction {
             });
             return action;
         }
-    }
 
     let focus_row = app.current_tab().sel.focus;
     let scroll_to = app.current_tab_mut().scroll_to_row.take();
@@ -160,7 +159,7 @@ pub fn file_table(app: &mut FluxApp, ui: &mut egui::Ui) -> RowAction {
         builder = builder.scroll_to_row(r, Some(Align::Center));
     }
 
-    let mut header = |mut header: egui_extras::TableRow<'_, '_>| {
+    let header = |mut header: egui_extras::TableRow<'_, '_>| {
         for (label, key) in [
             ("Name", SortKey::Name),
             ("Size", SortKey::Size),
@@ -188,7 +187,7 @@ pub fn file_table(app: &mut FluxApp, ui: &mut egui::Ui) -> RowAction {
     };
 
     builder
-        .header(22.0, |h| header(h))
+        .header(22.0, header)
         .body(|body| {
             body.rows(row_h, view_len, |mut row| {
                 let row_idx = row.index();

@@ -49,11 +49,10 @@ impl Selection {
 
     /// Ctrl/Cmd-click: toggle one entry.
     pub fn toggle_row(&mut self, snap: &DirSnapshot, row: usize) {
-        if let Some(idx) = snap.row_index(row) {
-            if !self.ids.remove(&idx) {
+        if let Some(idx) = snap.row_index(row)
+            && !self.ids.remove(&idx) {
                 self.ids.insert(idx);
             }
-        }
         self.anchor = Some(row);
         self.focus = Some(row);
     }
@@ -100,12 +99,11 @@ impl Selection {
     pub fn reselect_names(&mut self, snap: &DirSnapshot, names: &HashSet<OsString>) {
         self.ids.clear();
         for (row, &idx) in snap.view().iter().enumerate() {
-            if let Some(e) = snap.entry(idx) {
-                if names.contains(&e.name) {
+            if let Some(e) = snap.entry(idx)
+                && names.contains(&e.name) {
                     self.ids.insert(idx);
                     let _ = row;
                 }
-            }
         }
     }
 

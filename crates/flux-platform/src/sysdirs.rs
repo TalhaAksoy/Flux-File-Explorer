@@ -22,11 +22,10 @@ pub fn known_dirs() -> Vec<(&'static str, PathBuf)> {
             ("Home", Some(u.home_dir().to_path_buf())),
         ];
         for (label, p) in candidates {
-            if let Some(p) = p {
-                if p.exists() && !out.iter().any(|(_, q)| q == &p) {
+            if let Some(p) = p
+                && p.exists() && !out.iter().any(|(_, q)| q == &p) {
                     out.push((label, p));
                 }
-            }
         }
     }
     if out.is_empty() {

@@ -80,11 +80,10 @@ impl EnumEngine {
         }
         // If the worker died, navigation degrades to "Failed" visibly rather
         // than hanging: mark the snapshot so the UI shows an error state.
-        if self.req_tx.send(EnumRequest { snap: snap.clone(), gen_id }).is_err() {
-            if let Ok(mut s) = snap.write() {
+        if self.req_tx.send(EnumRequest { snap: snap.clone(), gen_id }).is_err()
+            && let Ok(mut s) = snap.write() {
                 s.fail("enumeration worker unavailable".into());
             }
-        }
         gen_id
     }
 

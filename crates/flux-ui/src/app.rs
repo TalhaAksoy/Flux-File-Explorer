@@ -202,6 +202,12 @@ pub struct FluxApp {
     pub last_gc: Instant,
 }
 
+impl Default for FluxApp {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FluxApp {
     pub fn new() -> Self {
         let settings = flux_settings::load();
@@ -387,11 +393,10 @@ impl FluxApp {
     pub fn focused_path(&self) -> Option<PathBuf> {
         let tab = self.current_tab();
         let s = tab.snap.read().unwrap();
-        if let Some(row) = tab.sel.focus {
-            if let Some(idx) = s.row_index(row) {
+        if let Some(row) = tab.sel.focus
+            && let Some(idx) = s.row_index(row) {
                 return s.entry_path(idx);
             }
-        }
         tab.sel.ids.iter().next().and_then(|&i| s.entry_path(i))
     }
 
@@ -591,12 +596,11 @@ impl FluxApp {
         for ev in compute_events {
             if let ComputeEvent::ViewReady { gen_id } = ev {
                 for tab in &mut self.tabs {
-                    if tab.gen_id == gen_id {
-                        if let Some(names) = tab.pending_reselect.take() {
+                    if tab.gen_id == gen_id
+                        && let Some(names) = tab.pending_reselect.take() {
                             let s = tab.snap.read().unwrap();
                             tab.sel.reselect_names(&s, &names);
                         }
-                    }
                 }
                 ctx.request_repaint();
             }
@@ -633,12 +637,11 @@ impl FluxApp {
             ctx.request_repaint();
         }
         // Deferred bulk-rename preview recompute (debounced).
-        if let Dialog::BulkRename(br) = &mut self.dialog {
-            if br.dirty && br.last_edit.elapsed() > Duration::from_millis(250) {
+        if let Dialog::BulkRename(br) = &mut self.dialog
+            && br.dirty && br.last_edit.elapsed() > Duration::from_millis(250) {
                 br.recompute();
                 ctx.request_repaint();
             }
-        }
         // GC finished ops once a minute.
         if self.last_gc.elapsed() > Duration::from_secs(60) {
             self.last_gc = Instant::now();
@@ -708,19 +711,20 @@ impl FluxApp {
 }
 
 fn sort_from_settings(s: &Settings) -> SortSpec {
-    let mut spec = SortSpec::default();
-    spec.dirs_first = s.dirs_first;
-    spec.dir = if s.sort_desc {
-        flux_core::SortDir::Desc
-    } else {
-        flux_core::SortDir::Asc
-    };
-    spec.key = match s.sort_key.as_str() {
-        "size" => flux_core::SortKey::Size,
-        "modified" => flux_core::SortKey::Modified,
-        "extension" => flux_core::SortKey::Extension,
-        "kind" => flux_core::SortKey::Kind,
-        _ => flux_core::SortKey::Name,
-    };
-    spec
+    SortSpec {
+        dirs_first: s.dirs_first,
+        dir: if s.sort_desc {
+            flux_core::SortDir::Desc
+        } else {
+            flux_core::SortDir::Asc
+        },
+        key: match s.sort_key.as_str() {
+            "size" => flux_core::SortKey::Size,
+            "modified" => flux_core::SortKey::Modified,
+            "extension" => flux_core::SortKey::Extension,
+            "kind" => flux_core::SortKey::Kind,
+            _ => flux_core::SortKey::Name,
+        },
+        ..SortSpec::default()
+    }
 }

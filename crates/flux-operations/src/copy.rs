@@ -174,9 +174,8 @@ pub fn copy_file(src: &Path, dst: &Path, c: &CopyCtx<'_>) -> std::io::Result<Ite
     let src_len = fs::symlink_metadata(src).map(|m| m.len()).unwrap_or(0);
     let tmp = staging_path(&dst, c.tag);
     let res = if src_len <= SMALL_FILE_FAST_PATH {
-        fs::copy(src, &tmp).map(|n| {
+        fs::copy(src, &tmp).inspect(|&n| {
             set_state(c, |p| p.done_bytes += n);
-            n
         })
     } else {
         copy_file_chunks(src, &tmp, c)
@@ -233,11 +232,10 @@ pub fn copy_tree(src: &Path, dst: &Path, c: &CopyCtx<'_>) -> std::io::Result<Ite
     let md = fs::symlink_metadata(src)?;
     if md.file_type().is_symlink() {
         let r = copy_symlink(src, dst, c);
-        return r.map(|o| {
+        return r.inspect(|&o| {
             if o == ItemOutcome::Done {
                 tick_item(c, src, 0);
             }
-            o
         });
     }
     if md.is_dir() {

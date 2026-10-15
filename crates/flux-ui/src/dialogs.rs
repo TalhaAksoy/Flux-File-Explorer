@@ -432,12 +432,11 @@ pub fn row_context_menu(app: &mut FluxApp, ui: &mut egui::Ui, items: &[PathBuf])
             }
         }
     }
-    if let Some(p) = first.clone() {
-        if p.is_dir() && ui.button("Open in New Tab").clicked() {
+    if let Some(p) = first.clone()
+        && p.is_dir() && ui.button("Open in New Tab").clicked() {
             ui.close();
             app.new_tab_at(p);
         }
-    }
     ui.separator();
     if ui.button("Copy").clicked() {
         ui.close();
@@ -481,12 +480,10 @@ pub fn row_context_menu(app: &mut FluxApp, ui: &mut egui::Ui, items: &[PathBuf])
                 .join("\n"),
         );
     }
-    if single {
-        if let Some(p) = first.clone() {
-            if ui.button("Properties").clicked() {
+    if single
+        && let Some(p) = first.clone()
+            && ui.button("Properties").clicked() {
                 ui.close();
                 app.dialog = Dialog::Properties { path: p };
             }
-        }
-    }
 }

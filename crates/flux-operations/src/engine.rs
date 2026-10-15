@@ -127,8 +127,8 @@ impl OpEngine {
 
     /// Cancel a running or queued op (also answers any pending conflict).
     pub fn cancel(&self, id: OpId) {
-        if let Ok(ops) = self.ops.read() {
-            if let Some(op) = ops.iter().find(|o| o.id == id) {
+        if let Ok(ops) = self.ops.read()
+            && let Some(op) = ops.iter().find(|o| o.id == id) {
                 op.cancel.store(true, Ordering::Relaxed);
                 if let Some(tx) = op.conflict_reply.lock().unwrap().take() {
                     let _ = tx.send(ConflictDecision {
@@ -137,17 +137,14 @@ impl OpEngine {
                     });
                 }
             }
-        }
     }
 
     pub fn answer_conflict(&self, query_op: OpId, decision: ConflictDecision) {
-        if let Ok(ops) = self.ops.read() {
-            if let Some(op) = ops.iter().find(|o| o.id == query_op) {
-                if let Some(tx) = op.conflict_reply.lock().unwrap().take() {
+        if let Ok(ops) = self.ops.read()
+            && let Some(op) = ops.iter().find(|o| o.id == query_op)
+                && let Some(tx) = op.conflict_reply.lock().unwrap().take() {
                     let _ = tx.send(decision);
                 }
-            }
-        }
     }
 
     /// Active ops (not finished), for the status bar / progress panel.

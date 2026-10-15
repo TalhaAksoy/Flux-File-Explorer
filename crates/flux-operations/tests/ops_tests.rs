@@ -1,11 +1,11 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
-use std::sync::{Mutex, mpsc};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use flux_operations::conflict::{ConflictAction, ConflictPolicy, keep_both_path, validate_filename};
-use flux_operations::copy::{CopyCtx, copy_tree, discover, remove_tree};
+use flux_operations::copy::{CopyCtx, copy_tree, discover};
 use flux_operations::progress::{OpProgress, OpState};
 use flux_operations::rename::{RenameRule, execute_renames, plan_renames};
 use flux_operations::{OpEngine, OpEvent, OpKind, RenameStatus};
@@ -104,7 +104,7 @@ fn discover_counts_items_and_bytes() {
     let progress = Mutex::new(OpProgress::default());
     let cancel = AtomicBool::new(false);
     let ctx = noop_ctx(&progress, &cancel);
-    discover(&ctx, &[dir.clone()]);
+    discover(&ctx, std::slice::from_ref(&dir));
     let p = progress.lock().unwrap();
     assert_eq!(p.total_items, 4); // dir + file a + subdir + file b
     assert_eq!(p.total_bytes, 150);
@@ -240,14 +240,13 @@ fn wait_op(engine: &OpEngine, id: u64, timeout: Duration) -> OpProgress {
                 panic!("unexpected conflict in test");
             }
         }
-        if let Ok(ops) = engine.ops.read() {
-            if let Some(o) = ops.iter().find(|o| o.id == id) {
+        if let Ok(ops) = engine.ops.read()
+            && let Some(o) = ops.iter().find(|o| o.id == id) {
                 let p = o.progress_snapshot();
                 if p.state.is_finished() {
                     return p;
                 }
             }
-        }
         if Instant::now() > deadline {
             panic!("op {id} did not finish");
         }
