@@ -272,7 +272,7 @@ impl FluxApp {
                 ui.weak(format!("{} result(s)", self.search_ui.hits.len()));
             }
         });
-        ui.separator();
+        ui.add_space(2.0);
         let hits = std::mem::take(&mut self.search_ui.hits);
         let mut open_dir: Option<PathBuf> = None;
         let mut open_file: Option<PathBuf> = None;
@@ -356,14 +356,18 @@ impl FluxApp {
         let mut close = false;
         let mut run: Option<&'static str> = None;
         egui::Window::new("Command Palette")
+            .title_bar(false)
             .collapsible(false)
             .resizable(false)
-            .anchor(egui::Align2::CENTER_TOP, [0.0, 80.0])
+            .anchor(egui::Align2::CENTER_TOP, [0.0, 96.0])
+            .default_width(430.0)
             .show(ctx, |ui| {
-                let resp = ui.add_sized(
-                    [360.0, 24.0],
+                let pal = theme::Palette::of(&ui.style().visuals);
+                let resp = ui.add(
                     egui::TextEdit::singleline(&mut self.palette_query)
-                        .hint_text("Type a command…"),
+                        .desired_width(f32::INFINITY)
+                        .hint_text("Type a command…")
+                        .font(egui::FontId::proportional(15.0)),
                 );
                 resp.request_focus();
                 let q = self.palette_query.to_lowercase();
@@ -372,8 +376,35 @@ impl FluxApp {
                     .filter(|c| q.is_empty() || c.name.to_lowercase().contains(&q))
                     .take(9)
                     .collect();
+                if !matches.is_empty() {
+                    ui.add_space(6.0);
+                }
                 for (i, c) in matches.iter().enumerate() {
-                    let resp2 = ui.selectable_label(i == self.palette_sel, c.name);
+                    let selected = i == self.palette_sel;
+                    let w = ui.available_width();
+                    let (rect, resp2) =
+                        ui.allocate_exact_size(egui::vec2(w, 26.0), egui::Sense::click());
+                    let fill = if selected {
+                        pal.accent_fill
+                    } else if resp2.hovered() {
+                        pal.surface_hover
+                    } else {
+                        egui::Color32::TRANSPARENT
+                    };
+                    if fill != egui::Color32::TRANSPARENT {
+                        ui.painter().rect_filled(
+                            rect.shrink2(egui::vec2(2.0, 0.0)),
+                            egui::CornerRadius::same(6),
+                            fill,
+                        );
+                    }
+                    ui.painter().text(
+                        egui::pos2(rect.left() + 10.0, rect.center().y),
+                        egui::Align2::LEFT_CENTER,
+                        c.name,
+                        egui::FontId::proportional(13.0),
+                        pal.text_primary,
+                    );
                     if resp2.clicked() {
                         run = Some(c.id);
                     }
@@ -824,6 +855,7 @@ pub fn run(start_dir: Option<PathBuf>) -> eframe::Result<()> {
             if let Some(d) = start_dir.filter(|d| d.is_dir()) {
                 app.navigate(d);
             }
+            cc.egui_ctx.set_fonts(theme::load_system_fonts());
             theme::apply_theme(&cc.egui_ctx, app.dark);
             Ok(Box::new(app))
         }),

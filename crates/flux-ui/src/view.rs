@@ -189,11 +189,19 @@ pub fn file_table(app: &mut FluxApp, ui: &mut egui::Ui) -> RowAction {
         ] {
             header.col(|ui| {
                 let sorted = sort_spec.key == key;
-                let resp = ui.selectable_label(
-                    false,
-                    egui::RichText::new(label).strong(),
+                // Quiet header: secondary text that brightens on hover,
+                // sorted column in primary + a painted triangle.
+                let col = if sorted {
+                    pal.text_primary
+                } else {
+                    pal.text_secondary
+                };
+                let resp = ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(label).size(12.0).color(col),
+                    )
+                    .sense(egui::Sense::click()),
                 );
-                // Painted triangle — ▲/▼ aren't in the bundled font.
                 if sorted {
                     let r = egui::Rect::from_center_size(
                         egui::pos2(resp.rect.right() + 7.0, resp.rect.center().y),
@@ -203,7 +211,7 @@ pub fn file_table(app: &mut FluxApp, ui: &mut egui::Ui) -> RowAction {
                         ui.painter(),
                         r,
                         sort_spec.dir == flux_core::SortDir::Asc,
-                        ui.visuals().strong_text_color(),
+                        pal.text_primary,
                     );
                 }
                 if resp.clicked() {
@@ -264,27 +272,29 @@ pub fn file_table(app: &mut FluxApp, ui: &mut egui::Ui) -> RowAction {
                         egui::Align2::LEFT_CENTER,
                         &name,
                         egui::FontId::default(),
-                        if selected {
-                            ui.visuals().selection.stroke.color
-                        } else if kind == EntryKind::Dir {
-                            pal.dir_icon
-                        } else {
-                            ui.visuals().text_color()
-                        },
+                        pal.text_primary,
+                    );
+                });
+                // Metadata is secondary information — quieter color.
+                row.col(|ui| {
+                    ui.label(
+                        egui::RichText::new(format_size(size)).color(pal.text_secondary),
                     );
                 });
                 row.col(|ui| {
-                    ui.label(format_size(size));
+                    ui.label(
+                        egui::RichText::new(format_mtime(mtime)).color(pal.text_secondary),
+                    );
                 });
                 row.col(|ui| {
-                    ui.label(format_mtime(mtime));
-                });
-                row.col(|ui| {
-                    ui.label(match kind {
-                        EntryKind::Dir => "Folder",
-                        EntryKind::Symlink => "Link",
-                        _ => flux_platform::type_label(ext.as_deref()),
-                    });
+                    ui.label(
+                        egui::RichText::new(match kind {
+                            EntryKind::Dir => "Folder",
+                            EntryKind::Symlink => "Link",
+                            _ => flux_platform::type_label(ext.as_deref()),
+                        })
+                        .color(pal.text_secondary),
+                    );
                 });
 
                 let resp = row.response();

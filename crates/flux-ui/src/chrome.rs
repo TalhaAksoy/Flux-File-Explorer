@@ -80,7 +80,7 @@ pub fn toolbar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
         if glyphs::icon_button(ui, glyphs::Glyph::Refresh, "Refresh (F5)", true).clicked() {
             act.refresh = true;
         }
-        ui.separator();
+        ui.add_space(8.0);
 
         // Breadcrumb or editable path field.
         if let Some(text) = &mut app.address_edit {
@@ -108,22 +108,67 @@ pub fn toolbar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
                 cur = p.parent();
             }
             crumbs.reverse();
+            let pal = crate::theme::Palette::of(&ui.style().visuals);
             egui::ScrollArea::horizontal()
                 .id_salt("crumbs")
                 .max_width(ui.available_width() - 260.0)
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        for c in crumbs {
+                        ui.spacing_mut().item_spacing.x = 2.0;
+                        let n = crumbs.len();
+                        for (i, c) in crumbs.into_iter().enumerate() {
                             let label = c
                                 .file_name()
                                 .map(|n| n.to_string_lossy().into_owned())
                                 .unwrap_or_else(|| c.display().to_string());
-                            let resp = ui.link(label);
+                            let last = i == n - 1;
+                            // Ghost crumb: quiet text, pill hover, accent
+                            // only for the current directory.
+                            let size = egui::vec2(
+                                ui.painter()
+                                    .layout_no_wrap(
+                                        label.clone(),
+                                        egui::FontId::proportional(14.0),
+                                        pal.text_secondary,
+                                    )
+                                    .size()
+                                    .x
+                                    + 14.0,
+                                26.0,
+                            );
+                            let (rect, resp) =
+                                ui.allocate_exact_size(size, egui::Sense::click());
+                            if resp.hovered() {
+                                ui.painter().rect_filled(
+                                    rect,
+                                    egui::CornerRadius::same(6),
+                                    pal.surface_hover,
+                                );
+                            }
+                            ui.painter().text(
+                                rect.center(),
+                                egui::Align2::CENTER_CENTER,
+                                &label,
+                                egui::FontId::proportional(14.0),
+                                if last { pal.text_primary } else { pal.text_secondary },
+                            );
                             drop_target(app, ui, &resp, &c, act);
                             if resp.clicked() {
                                 act.navigate = Some(c.clone());
                             }
-                            ui.label(egui::RichText::new("›").weak());
+                            if !last {
+                                ui.painter().text(
+                                    egui::pos2(
+                                        rect.right() + 7.0,
+                                        rect.center().y,
+                                    ),
+                                    egui::Align2::CENTER_CENTER,
+                                    "›",
+                                    egui::FontId::proportional(13.0),
+                                    pal.text_muted,
+                                );
+                                ui.add_space(10.0);
+                            }
                         }
                     });
                 });
@@ -174,16 +219,25 @@ pub fn toolbar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
 
 /// Left sidebar: places, bookmarks, volumes.
 pub fn sidebar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
-    ui.add_space(4.0);
+    ui.add_space(6.0);
     let pal = crate::theme::Palette::of(&ui.style().visuals);
+    let current = app.current_path();
     let folder_icon =
         |p: &egui::Painter, r: egui::Rect, _c: egui::Color32| {
             crate::view::paint_entry_icon(p, r, flux_core::EntryKind::Dir, &pal)
         };
+    let section = |ui: &mut egui::Ui, label: &str| {
+        ui.add_space(8.0);
+        ui.label(
+            egui::RichText::new(label)
+                .color(pal.text_muted)
+                .size(11.0),
+        );
+    };
     egui::ScrollArea::vertical().id_salt("sidebar").show(ui, |ui| {
-        ui.label(egui::RichText::new("Places").weak().small());
+        section(ui, "Places");
         for (label, path) in app.known.clone() {
-            let resp = glyphs::icon_row(ui, folder_icon, label);
+            let resp = glyphs::icon_row(ui, folder_icon, label, path == current);
             resp.context_menu(|ui| {
                 if ui.button("Open").clicked() {
                     act.navigate = Some(path.clone());
@@ -200,14 +254,13 @@ pub fn sidebar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
             }
         }
         if !app.settings.recents.is_empty() {
-            ui.add_space(6.0);
-            ui.label(egui::RichText::new("Recent").weak().small());
+            section(ui, "Recent");
             for p in app.settings.recents.iter().take(6).cloned().collect::<Vec<_>>() {
                 let label = p
                     .file_name()
                     .map(|n| n.to_string_lossy().into_owned())
                     .unwrap_or_else(|| p.display().to_string());
-                let resp = glyphs::icon_row(ui, folder_icon, &label)
+                let resp = glyphs::icon_row(ui, folder_icon, &label, p == current)
                     .on_hover_text(p.display().to_string());
                 resp.context_menu(|ui| {
                     if ui.button("Open").clicked() {
@@ -226,15 +279,14 @@ pub fn sidebar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
             }
         }
         if !app.settings.bookmarks.is_empty() {
-            ui.add_space(6.0);
-            ui.label(egui::RichText::new("Bookmarks").weak().small());
+            section(ui, "Bookmarks");
             let mut unpin: Option<PathBuf> = None;
             for p in app.settings.bookmarks.clone() {
                 let label = p
                     .file_name()
                     .map(|n| n.to_string_lossy().into_owned())
                     .unwrap_or_else(|| p.display().to_string());
-                let resp = glyphs::icon_row(ui, folder_icon, &label)
+                let resp = glyphs::icon_row(ui, folder_icon, &label, p == current)
                     .on_hover_text(p.display().to_string());
                 resp.context_menu(|ui| {
                     if ui.button("Open").clicked() {
@@ -260,13 +312,13 @@ pub fn sidebar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
                 app.unpin_from_sidebar(&p);
             }
         }
-        ui.add_space(6.0);
-        ui.label(egui::RichText::new("Volumes").weak().small());
+        section(ui, "Volumes");
         for v in app.volumes.clone() {
             let resp = glyphs::icon_row(
                 ui,
                 |p, r, c| glyphs::paint_glyph(p, r, glyphs::Glyph::Disk, c),
                 &v.label,
+                v.mount == current,
             )
             .on_hover_text(v.mount.display().to_string());
             drop_target(app, ui, &resp, &v.mount, act);
@@ -277,15 +329,15 @@ pub fn sidebar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
     });
 }
 
-/// Tab strip above the table.
+/// Tab strip above the table — pill surfaces, not boxed browser tabs.
 pub fn tab_bar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
     {
         let st = ui.style_mut();
         st.spacing.interact_size.y = 26.0;
-        st.text_styles
-            .insert(egui::TextStyle::Body, egui::FontId::proportional(14.0));
     }
+    let pal = crate::theme::Palette::of(&ui.style().visuals);
     ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 4.0;
         let n = app.tabs.len();
         let mut close_idx = None;
         for i in 0..n {
@@ -301,7 +353,66 @@ pub fn tab_bar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
             } else {
                 title
             };
-            let resp = ui.selectable_label(selected, label);
+            // Measure the label; close × occupies the right slot on the
+            // active/hovered tab.
+            let text_w = ui
+                .painter()
+                .layout_no_wrap(
+                    label.clone(),
+                    egui::FontId::proportional(13.0),
+                    pal.text_primary,
+                )
+                .size()
+                .x;
+            let show_x = n > 1;
+            let w = text_w + 22.0 + if show_x { 14.0 } else { 0.0 };
+            let (rect, resp) =
+                ui.allocate_exact_size(egui::vec2(w, 26.0), egui::Sense::click());
+            let fill = if selected {
+                pal.bg_elevated
+            } else if resp.hovered() {
+                pal.surface_hover
+            } else {
+                egui::Color32::TRANSPARENT
+            };
+            if fill != egui::Color32::TRANSPARENT {
+                ui.painter().rect_filled(rect, egui::CornerRadius::same(7), fill);
+            }
+            ui.painter().text(
+                egui::pos2(rect.left() + 11.0, rect.center().y),
+                egui::Align2::LEFT_CENTER,
+                &label,
+                egui::FontId::proportional(13.0),
+                if selected { pal.text_primary } else { pal.text_secondary },
+            );
+            // × close — active tab always, others on hover.
+            if show_x {
+                let xr = egui::Rect::from_center_size(
+                    egui::pos2(rect.right() - 13.0, rect.center().y),
+                    egui::Vec2::splat(14.0),
+                );
+                let xresp = ui.interact(
+                    xr,
+                    egui::Id::new("tabx").with(i),
+                    egui::Sense::click(),
+                );
+                let xcol = if xresp.hovered() {
+                    pal.text_primary
+                } else {
+                    pal.text_muted
+                };
+                if selected || xresp.hovered() || resp.hovered() {
+                    glyphs::paint_glyph(
+                        ui.painter(),
+                        xr.shrink(3.0),
+                        glyphs::Glyph::Close,
+                        xcol,
+                    );
+                }
+                if xresp.clicked() {
+                    close_idx = Some(i);
+                }
+            }
             if resp.clicked() {
                 act.activate_tab = Some(i);
             }
@@ -351,30 +462,39 @@ pub fn status_bar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) 
     };
     let _ = total;
 
+    let pal = crate::theme::Palette::of(&ui.style().visuals);
+    let quiet = |ui: &mut egui::Ui, s: String| {
+        ui.label(egui::RichText::new(s).color(pal.text_secondary).size(11.5));
+    };
+    let dot = |ui: &mut egui::Ui| {
+        ui.label(egui::RichText::new("·").color(pal.text_muted));
+    };
     ui.horizontal(|ui| {
         let item_label = if loading {
             format!("{} items (loading…)", format_count(view_len))
         } else {
             format!("{} items", format_count(view_len))
         };
-        ui.label(&item_label);
+        quiet(ui, item_label);
         if sel_count > 0 {
-            ui.weak("·");
-            ui.label(format!("{} selected", format_count(sel_count)));
+            dot(ui);
+            quiet(ui, format!("{} selected", format_count(sel_count)));
             if sel_bytes > 0 {
-                ui.weak("·");
-                ui.label(format_size(sel_bytes));
+                dot(ui);
+                quiet(ui, format_size(sel_bytes));
             }
         }
         if let Some(fs) = app.free_space {
-            ui.weak("·");
-            ui.weak(format!("{} free", format_size(fs.available)));
+            dot(ui);
+            quiet(ui, format!("{} free", format_size(fs.available)));
         }
         // Toast.
         if let Some((msg, t)) = &app.status_msg
             && t.elapsed() < std::time::Duration::from_secs(6) {
-                ui.weak("·");
-                ui.label(egui::RichText::new(msg).italics());
+                dot(ui);
+                ui.label(
+                    egui::RichText::new(msg).italics().color(pal.text_secondary).size(11.5),
+                );
             }
         // Active op progress on the right.
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

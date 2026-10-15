@@ -137,37 +137,48 @@ pub fn paint_glyph(p: &egui::Painter, rect: Rect, g: Glyph, color: Color32) {
 }
 
 /// A sidebar-style row: small painted glyph + label, full-width clickable.
-/// Returns the response (hover styling handled internally).
+/// `selected` draws the calm "current location" pill. Returns the response.
 pub fn icon_row(
     ui: &mut egui::Ui,
     paint: impl FnOnce(&egui::Painter, Rect, Color32),
     label: &str,
+    selected: bool,
 ) -> egui::Response {
     let h = ui.spacing().interact_size.y;
     let w = ui.available_width();
     let (rect, resp) =
         ui.allocate_exact_size(Vec2::new(w, h), egui::Sense::click());
-    let vis = ui.style().interact(&resp);
-    if resp.hovered() {
-        ui.painter().rect(
-            rect,
-            vis.corner_radius,
-            vis.weak_bg_fill,
-            vis.bg_stroke,
-            StrokeKind::Inside,
+    let pal = crate::theme::Palette::of(&ui.style().visuals);
+    let hovered = resp.hovered() && !selected;
+    if selected {
+        ui.painter().rect_filled(
+            rect.shrink2(Vec2::new(2.0, 1.0)),
+            CornerRadius::same(6),
+            pal.surface_selected,
+        );
+    } else if hovered {
+        ui.painter().rect_filled(
+            rect.shrink2(Vec2::new(2.0, 1.0)),
+            CornerRadius::same(6),
+            pal.surface_hover,
         );
     }
+    let text_col = if selected {
+        pal.text_primary
+    } else {
+        pal.text_secondary
+    };
     let ir = Rect::from_center_size(
         Pos2::new(rect.left() + h * 0.55, rect.center().y),
         Vec2::splat(h * 0.62),
     );
-    paint(ui.painter(), ir, vis.fg_stroke.color);
+    paint(ui.painter(), ir, if selected { pal.text_primary } else { text_col });
     ui.painter().text(
         Pos2::new(rect.left() + h * 1.05, rect.center().y),
         egui::Align2::LEFT_CENTER,
         label,
-        egui::FontId::default(),
-        vis.fg_stroke.color,
+        egui::FontId::proportional(13.0),
+        text_col,
     );
     resp
 }

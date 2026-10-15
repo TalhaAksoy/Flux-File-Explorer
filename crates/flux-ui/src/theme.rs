@@ -1,5 +1,6 @@
-//! Visual identity: restrained, dense, fast. Short hovers, no gratuitous
-//! animation.
+//! Design tokens + theme application. One semantic palette drives every
+//! surface: closely related neutral tones, translucent accents, no hard
+//! borders. Surfaces separate by ~4-6 value steps, not lines.
 
 use egui::{Color32, CornerRadius, Stroke, Style, Visuals};
 
@@ -27,124 +28,221 @@ impl Density {
     }
 }
 
+/// Semantic design tokens — the single source of truth for color.
+/// `Palette::dark()`/`light()` return cohesive sets; every UI element
+/// reads from these, never ad-hoc literals.
 pub struct Palette {
+    // Accents & states
     pub accent: Color32,
-    pub accent_soft: Color32,
+    /// Translucent accent tint — row selection, focused chrome.
+    pub accent_fill: Color32,
+    pub danger: Color32,
+    pub warn: Color32,
+    // Surfaces (darkest → lightest in dark mode; reversed in light)
+    pub bg_window: Color32,
+    pub bg_sidebar: Color32,
+    pub bg_content: Color32,
+    /// Popups, dialogs, active tabs — floats above content.
+    pub bg_elevated: Color32,
+    /// Text fields: slightly recessed so they read as input zones.
+    pub field_inset: Color32,
+    /// Alternating row stripe — barely a step off content.
+    pub stripe: Color32,
+    pub surface_hover: Color32,
+    pub surface_active: Color32,
+    pub surface_selected: Color32,
+    // Type hierarchy
+    pub text_primary: Color32,
+    pub text_secondary: Color32,
+    pub text_muted: Color32,
+    // File glyphs (fallbacks when no native icon)
     pub dir_icon: Color32,
     pub file_icon: Color32,
     pub link_icon: Color32,
-    pub error: Color32,
-    pub warn: Color32,
+    /// Last-resort hairline — only where a boundary is functional.
+    pub border_soft: Color32,
 }
 
 impl Palette {
+    pub fn dark() -> Self {
+        let accent = Color32::from_rgb(80, 140, 235);
+        Self {
+            accent,
+            accent_fill: accent.gamma_multiply(0.24),
+            danger: Color32::from_rgb(229, 72, 77),
+            warn: Color32::from_rgb(226, 175, 75),
+            bg_window: Color32::from_rgb(23, 25, 28),
+            bg_sidebar: Color32::from_rgb(28, 30, 34),
+            bg_content: Color32::from_rgb(32, 34, 38),
+            bg_elevated: Color32::from_rgb(38, 41, 46),
+            field_inset: Color32::from_rgb(26, 28, 32),
+            stripe: Color32::from_rgb(35, 37, 42),
+            surface_hover: Color32::from_rgb(42, 45, 50),
+            surface_active: Color32::from_rgb(48, 51, 57),
+            surface_selected: Color32::from_rgb(48, 57, 67),
+            text_primary: Color32::from_rgb(232, 234, 237),
+            text_secondary: Color32::from_rgb(150, 155, 164),
+            text_muted: Color32::from_rgb(116, 122, 132),
+            dir_icon: Color32::from_rgb(96, 165, 250),
+            file_icon: Color32::from_rgb(148, 156, 170),
+            link_icon: Color32::from_rgb(180, 140, 230),
+            border_soft: Color32::from_rgb(50, 53, 59).gamma_multiply(0.55),
+        }
+    }
+
+    pub fn light() -> Self {
+        let accent = Color32::from_rgb(40, 105, 215);
+        Self {
+            accent,
+            accent_fill: accent.gamma_multiply(0.14),
+            danger: Color32::from_rgb(198, 52, 48),
+            warn: Color32::from_rgb(160, 110, 20),
+            bg_window: Color32::from_rgb(245, 246, 248),
+            bg_sidebar: Color32::from_rgb(240, 241, 244),
+            bg_content: Color32::from_rgb(250, 250, 251),
+            bg_elevated: Color32::from_rgb(255, 255, 255),
+            field_inset: Color32::from_rgb(242, 243, 246),
+            stripe: Color32::from_rgb(246, 247, 249),
+            surface_hover: Color32::from_rgb(235, 237, 241),
+            surface_active: Color32::from_rgb(228, 231, 236),
+            surface_selected: Color32::from_rgb(226, 234, 243),
+            text_primary: Color32::from_rgb(34, 37, 43),
+            text_secondary: Color32::from_rgb(108, 114, 125),
+            text_muted: Color32::from_rgb(154, 160, 170),
+            dir_icon: Color32::from_rgb(45, 125, 210),
+            file_icon: Color32::from_rgb(110, 118, 132),
+            link_icon: Color32::from_rgb(140, 95, 200),
+            border_soft: Color32::from_rgb(214, 217, 224),
+        }
+    }
+
     pub fn of(visuals: &Visuals) -> Self {
         if visuals.dark_mode {
-            Self {
-                accent: Color32::from_rgb(80, 140, 255),
-                accent_soft: Color32::from_rgb(60, 100, 190),
-                dir_icon: Color32::from_rgb(96, 165, 250),
-                file_icon: Color32::from_rgb(148, 156, 170),
-                link_icon: Color32::from_rgb(180, 140, 230),
-                error: Color32::from_rgb(235, 87, 87),
-                warn: Color32::from_rgb(235, 180, 60),
-            }
+            Self::dark()
         } else {
-            Self {
-                accent: Color32::from_rgb(35, 100, 220),
-                accent_soft: Color32::from_rgb(210, 225, 250),
-                dir_icon: Color32::from_rgb(45, 125, 210),
-                file_icon: Color32::from_rgb(110, 118, 132),
-                link_icon: Color32::from_rgb(140, 95, 200),
-                error: Color32::from_rgb(200, 45, 45),
-                warn: Color32::from_rgb(180, 130, 20),
-            }
+            Self::light()
         }
     }
 }
 
-/// Fill for the top/bottom chrome — a subtle step *lighter* than the
-/// content background, so zones read as raised surface rather than being
-/// separated by ruled lines.
+/// Fill for the top/bottom chrome — the window tone itself; the toolbar
+/// merges into the title surface rather than floating above the list.
 pub fn chrome_fill(dark: bool) -> Color32 {
-    if dark {
-        Color32::from_rgb(33, 35, 41)
-    } else {
-        Color32::from_rgb(251, 252, 255)
-    }
+    if dark { Palette::dark() } else { Palette::light() }.bg_window
 }
 
-/// Sidebar fill — one step *recessed* below the content background.
+/// Sidebar fill — its own token, a half-step toward content.
 pub fn sidebar_fill(dark: bool) -> Color32 {
-    if dark {
-        Color32::from_rgb(22, 23, 27)
-    } else {
-        Color32::from_rgb(240, 242, 247)
+    if dark { Palette::dark() } else { Palette::light() }.bg_sidebar
+}
+
+fn widget(corner: u8, weak_bg: Color32, bg: Color32, fg: Color32, stroke: Color32) -> egui::style::WidgetVisuals {
+    egui::style::WidgetVisuals {
+        bg_fill: bg,
+        weak_bg_fill: weak_bg,
+        bg_stroke: Stroke::new(1.0, stroke),
+        corner_radius: CornerRadius::same(corner),
+        fg_stroke: Stroke::new(1.0, fg),
+        expansion: 0.0,
     }
 }
 
 pub fn apply_theme(ctx: &egui::Context, dark: bool) {
-    let mut visuals = if dark {
-        let mut v = Visuals::dark();
-        v.panel_fill = Color32::from_rgb(26, 27, 31);
-        v.window_fill = Color32::from_rgb(31, 33, 38);
-        v.extreme_bg_color = Color32::from_rgb(20, 21, 24);
-        v.faint_bg_color = Color32::from_rgb(35, 37, 43);
-        v.selection.bg_fill = Color32::from_rgb(50, 85, 160);
-        v.selection.stroke = Stroke::new(1.0, Color32::from_rgb(110, 160, 255));
-        v.hyperlink_color = Color32::from_rgb(110, 165, 255);
-        v.widgets.noninteractive.fg_stroke.color = Color32::from_rgb(212, 216, 224);
-        // Softer widget outlines — field borders shouldn't scream.
-        v.widgets.noninteractive.bg_stroke =
-            Stroke::new(1.0, Color32::from_rgb(54, 56, 63));
-        // Translucent accent selection — modern tint, not a solid slab.
-        v.selection.bg_fill = Color32::from_rgb(80, 140, 255).gamma_multiply(0.28);
-        v
-    } else {
-        let mut v = Visuals::light();
-        v.panel_fill = Color32::from_rgb(247, 248, 250);
-        v.window_fill = Color32::from_rgb(252, 253, 255);
-        v.extreme_bg_color = Color32::from_rgb(238, 240, 244);
-        v.selection.bg_fill = Color32::from_rgb(60, 115, 220).gamma_multiply(0.16);
-        v.selection.stroke = Stroke::new(1.0, Color32::from_rgb(60, 115, 220));
-        v.widgets.noninteractive.bg_stroke =
-            Stroke::new(1.0, Color32::from_rgb(219, 222, 229));
-        v
-    };
-    // Floating surfaces: rounded, softly shadowed — the 2025 desktop look.
-    visuals.menu_corner_radius = CornerRadius::same(10);
-    visuals.window_corner_radius = CornerRadius::same(12);
-    visuals.popup_shadow = egui::Shadow {
+    let p = if dark { Palette::dark() } else { Palette::light() };
+    let mut v = if dark { Visuals::dark() } else { Visuals::light() };
+
+    v.panel_fill = p.bg_content;
+    v.window_fill = p.bg_elevated;
+    v.extreme_bg_color = p.field_inset;
+    v.faint_bg_color = p.stripe;
+    v.text_edit_bg_color = Some(p.field_inset);
+    v.weak_text_color = Some(p.text_secondary);
+    v.override_text_color = None;
+    v.hyperlink_color = p.accent;
+    v.error_fg_color = p.danger;
+    v.warn_fg_color = p.warn;
+    v.selection.bg_fill = p.accent_fill;
+    v.selection.stroke = Stroke::new(1.0, p.accent);
+
+    // Widget states: resting controls are borderless ghosts; interaction
+    // reveals a soft surface fill. Focused fields take an accent edge.
+    let ws = &mut v.widgets;
+    ws.inactive = widget(6, Color32::TRANSPARENT, p.field_inset, p.text_primary, p.border_soft);
+    ws.hovered = widget(6, p.surface_hover, p.surface_hover, p.text_primary, p.border_soft);
+    ws.active = widget(6, p.surface_active, p.surface_active, p.text_primary, p.border_soft);
+    ws.open = widget(6, p.surface_hover, p.surface_hover, p.text_primary, p.border_soft);
+    ws.noninteractive = widget(6, Color32::TRANSPARENT, p.field_inset, p.text_primary, Color32::TRANSPARENT);
+
+    v.menu_corner_radius = CornerRadius::same(10);
+    v.window_corner_radius = CornerRadius::same(12);
+    v.popup_shadow = egui::Shadow {
         offset: [0, 6],
         blur: 20,
         spread: 0,
         color: Color32::from_black_alpha(if dark { 90 } else { 40 }),
     };
-    visuals.window_shadow = egui::Shadow {
+    v.window_shadow = egui::Shadow {
         offset: [0, 10],
         blur: 32,
         spread: 0,
         color: Color32::from_black_alpha(if dark { 110 } else { 55 }),
     };
+
     let mut style = Style {
-        visuals,
+        visuals: v,
         ..Style::default()
     };
-    // Tighter, denser defaults — this is a productivity tool.
-    style.spacing.item_spacing = egui::vec2(7.0, 5.0);
-    style.spacing.button_padding = egui::vec2(10.0, 4.0);
+    style.spacing.item_spacing = egui::vec2(8.0, 5.0);
+    style.spacing.button_padding = egui::vec2(10.0, 5.0);
     style.spacing.menu_margin = egui::Margin::same(7);
     style.spacing.scroll = egui::style::ScrollStyle::floating();
-    for w in [
-        &mut style.visuals.widgets.inactive,
-        &mut style.visuals.widgets.hovered,
-        &mut style.visuals.widgets.active,
-        &mut style.visuals.widgets.open,
-        &mut style.visuals.widgets.noninteractive,
-    ] {
-        w.corner_radius = CornerRadius::same(6);
-    }
+    // Typography scale — quiet, readable, no marketing-size headings.
+    let st = &mut style.text_styles;
+    st.insert(egui::TextStyle::Body, egui::FontId::proportional(13.5));
+    st.insert(egui::TextStyle::Button, egui::FontId::proportional(13.5));
+    st.insert(egui::TextStyle::Small, egui::FontId::proportional(11.5));
+    st.insert(egui::TextStyle::Heading, egui::FontId::proportional(16.5));
+    st.insert(egui::TextStyle::Monospace, egui::FontId::monospace(12.5));
+
     let theme = if dark { egui::Theme::Dark } else { egui::Theme::Light };
     ctx.set_style_of(theme, style);
     ctx.set_theme(theme);
+}
+
+/// System-native UI font, best-effort per platform. Falls back silently
+/// to egui's bundled fonts if nothing on the list parses/loads.
+pub fn load_system_fonts() -> egui::FontDefinitions {
+    let mut defs = egui::FontDefinitions::default();
+    let candidates: &[&str] = if cfg!(target_os = "macos") {
+        &[
+            "/System/Library/Fonts/SFNS.ttf",
+            "/System/Library/Fonts/HelveticaNeue.ttc",
+        ]
+    } else if cfg!(target_os = "windows") {
+        &[
+            "C:\\Windows\\Fonts\\segoeui.ttf",
+            "C:\\Windows\\Fonts\\segoeuivf.ttf",
+        ]
+    } else {
+        &[
+            "/usr/share/fonts/truetype/inter/Inter-Regular.otf",
+            "/usr/share/fonts/opentype/inter/Inter-Regular.otf",
+            "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+            "/usr/share/fonts/noto-sans/NotoSans-Regular.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+            "/usr/share/fonts/truetype/ubuntu/Ubuntu-R.ttf",
+        ]
+    };
+    for path in candidates {
+        let Ok(bytes) = std::fs::read(path) else { continue };
+        let data = egui::FontData::from_owned(bytes);
+        defs.font_data.insert("system-ui".into(), std::sync::Arc::new(data));
+        defs.families
+            .entry(egui::FontFamily::Proportional)
+            .or_default()
+            .insert(0, "system-ui".into());
+        break;
+    }
+    defs
 }
