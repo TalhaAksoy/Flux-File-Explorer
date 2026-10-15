@@ -33,16 +33,31 @@ pub struct RowAction {
 pub fn paint_entry_icon(p: &egui::Painter, rect: egui::Rect, kind: EntryKind, pal: &Palette) {
     match kind {
         EntryKind::Dir => {
+            // Two-tone folder: darker back + tab, lighter front body —
+            // keeps the silhouette legible down to ~12px.
+            let (w, h) = (rect.width(), rect.height());
+            let dark = pal.dir_icon.gamma_multiply(0.62);
+            let light = pal.dir_icon;
             let tab = egui::Rect::from_min_size(
                 rect.min,
-                Vec2::new(rect.width() * 0.45, rect.height() * 0.35),
+                Vec2::new(w * 0.44, h * 0.34),
             );
-            p.rect_filled(tab, 2.0, pal.dir_icon);
+            p.rect_filled(tab, 1.5, dark);
+            let back = egui::Rect::from_min_max(
+                egui::pos2(rect.left() + w * 0.4, rect.top() + h * 0.12),
+                egui::pos2(rect.right(), rect.top() + h * 0.42),
+            );
+            p.rect_filled(back, 1.5, dark);
             let body = egui::Rect::from_min_max(
-                egui::pos2(rect.left(), rect.top() + rect.height() * 0.28),
+                egui::pos2(rect.left(), rect.top() + h * 0.32),
                 rect.max,
             );
-            p.rect_filled(body, 2.0, pal.dir_icon);
+            p.rect_filled(body, 2.0, light);
+            // Sheen line across the front edge.
+            p.line_segment(
+                [body.left_top() + Vec2::new(1.0, 0.5), body.right_top() + Vec2::new(-1.0, 0.5)],
+                (0.8, Color32::WHITE.gamma_multiply(0.35)),
+            );
         }
         EntryKind::Symlink => {
             let body = rect.shrink(1.0);
@@ -173,18 +188,24 @@ pub fn file_table(app: &mut FluxApp, ui: &mut egui::Ui) -> RowAction {
             ("Type", SortKey::Kind),
         ] {
             header.col(|ui| {
-                let arrow = if sort_spec.key == key {
-                    match sort_spec.dir {
-                        flux_core::SortDir::Asc => " ▲",
-                        flux_core::SortDir::Desc => " ▼",
-                    }
-                } else {
-                    ""
-                };
+                let sorted = sort_spec.key == key;
                 let resp = ui.selectable_label(
                     false,
-                    egui::RichText::new(format!("{label}{arrow}")).strong(),
+                    egui::RichText::new(label).strong(),
                 );
+                // Painted triangle — ▲/▼ aren't in the bundled font.
+                if sorted {
+                    let r = egui::Rect::from_center_size(
+                        egui::pos2(resp.rect.right() + 7.0, resp.rect.center().y),
+                        egui::Vec2::splat(7.0),
+                    );
+                    crate::glyphs::paint_triangle(
+                        ui.painter(),
+                        r,
+                        sort_spec.dir == flux_core::SortDir::Asc,
+                        ui.visuals().strong_text_color(),
+                    );
+                }
                 if resp.clicked() {
                     action.sort = Some(SortSpec::for_header_click(&sort_spec, key));
                 }
@@ -272,16 +293,11 @@ pub fn file_table(app: &mut FluxApp, ui: &mut egui::Ui) -> RowAction {
                 }
                 if drag_active && kind == EntryKind::Dir && resp.hovered() {
                     action.drop_row = Some(row_idx);
-                    // Translucent accent overlay — the drop-target highlight.
-                    egui_ctx.debug_painter().rect_filled(
+                    // Bright accent glow marking the drop target row.
+                    crate::glyphs::glow_drop_target(
+                        &egui_ctx.debug_painter(),
                         resp.rect,
-                        4.0,
-                        egui_ctx
-                            .style_of(egui_ctx.theme())
-                            .visuals
-                            .selection
-                            .bg_fill
-                            .gamma_multiply(0.35),
+                        egui_ctx.style_of(egui_ctx.theme()).visuals.selection.stroke.color,
                     );
                 }
                 if resp.clicked() {

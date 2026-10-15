@@ -372,7 +372,16 @@ fn bulk_rename_dialog(app: &mut FluxApp, br: &mut BulkRenameState, ctx: &egui::C
                                     _ => ui.visuals().error_fg_color,
                                 };
                                 ui.label(egui::RichText::new(src_n).color(col));
-                                ui.label("→");
+                                let (ar, _) = ui.allocate_exact_size(
+                                    egui::Vec2::splat(12.0),
+                                    egui::Sense::hover(),
+                                );
+                                crate::glyphs::paint_glyph(
+                                    ui.painter(),
+                                    ar,
+                                    crate::glyphs::Glyph::Forward,
+                                    ui.visuals().weak_text_color(),
+                                );
                                 ui.label(egui::RichText::new(dst_n).color(col));
                                 if !a.status.is_ready() && a.status != RenameStatus::Unchanged {
                                     ui.label(

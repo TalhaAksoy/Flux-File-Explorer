@@ -6,6 +6,7 @@ use std::path::PathBuf;
 
 use crate::app::FluxApp;
 use crate::format::{format_count, format_size};
+use crate::glyphs;
 
 #[derive(Default)]
 pub struct ChromeAction {
@@ -41,11 +42,10 @@ pub struct ChromeAction {
 fn drop_target(app: &FluxApp, ui: &egui::Ui, resp: &egui::Response, dir: &std::path::Path, act: &mut ChromeAction) {
     if app.dragging.is_some() && resp.hovered() {
         act.drop_target = Some(dir.to_path_buf());
-        ui.painter().rect_stroke(
+        glyphs::glow_drop_target(
+            ui.painter(),
             resp.rect,
-            3.0,
-            ui.visuals().selection.stroke,
-            egui::StrokeKind::Inside,
+            ui.visuals().selection.stroke.color,
         );
     }
 }
@@ -56,16 +56,16 @@ pub fn toolbar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
         let tab = app.current_tab();
         let can_back = tab.history.can_back();
         let can_fwd = tab.history.can_forward();
-        if ui.add_enabled(can_back, egui::Button::new("←")).on_hover_text("Back (Alt+←)").clicked() {
+        if glyphs::icon_button(ui, glyphs::Glyph::Back, "Back (Alt+Left)", can_back).clicked() {
             act.back = true;
         }
-        if ui.add_enabled(can_fwd, egui::Button::new("→")).on_hover_text("Forward (Alt+→)").clicked() {
+        if glyphs::icon_button(ui, glyphs::Glyph::Forward, "Forward (Alt+Right)", can_fwd).clicked() {
             act.forward = true;
         }
-        if ui.button("↑").on_hover_text("Up (Backspace)").clicked() {
+        if glyphs::icon_button(ui, glyphs::Glyph::Up, "Up (Backspace)", true).clicked() {
             act.up = true;
         }
-        if ui.button("⟳").on_hover_text("Refresh (F5)").clicked() {
+        if glyphs::icon_button(ui, glyphs::Glyph::Refresh, "Refresh (F5)", true).clicked() {
             act.refresh = true;
         }
         ui.separator();
@@ -146,10 +146,13 @@ pub fn toolbar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
                     act.set_filter = Some(app.filter_text.clone());
                 }
             }
-            if ui
-                .selectable_label(app.search_ui.active, "⇲")
-                .on_hover_text("Toggle recursive search")
-                .clicked()
+            if glyphs::icon_toggle(
+                ui,
+                glyphs::Glyph::Search,
+                "Toggle recursive search",
+                app.search_ui.active,
+            )
+            .clicked()
             {
                 act.toggle_search = true;
             }
@@ -160,10 +163,15 @@ pub fn toolbar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
 /// Left sidebar: places, bookmarks, volumes.
 pub fn sidebar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
     ui.add_space(4.0);
+    let pal = crate::theme::Palette::of(&ui.style().visuals);
+    let folder_icon =
+        |p: &egui::Painter, r: egui::Rect, _c: egui::Color32| {
+            crate::view::paint_entry_icon(p, r, flux_core::EntryKind::Dir, &pal)
+        };
     egui::ScrollArea::vertical().id_salt("sidebar").show(ui, |ui| {
         ui.label(egui::RichText::new("Places").weak().small());
         for (label, path) in app.known.clone() {
-            let resp = ui.selectable_label(false, label);
+            let resp = glyphs::icon_row(ui, folder_icon, label);
             drop_target(app, ui, &resp, &path, act);
             if resp.clicked() {
                 act.navigate = Some(path);
@@ -177,8 +185,7 @@ pub fn sidebar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
                     .file_name()
                     .map(|n| n.to_string_lossy().into_owned())
                     .unwrap_or_else(|| p.display().to_string());
-                let resp = ui
-                    .selectable_label(false, label)
+                let resp = glyphs::icon_row(ui, folder_icon, &label)
                     .on_hover_text(p.display().to_string());
                 drop_target(app, ui, &resp, &p, act);
                 if resp.clicked() {
@@ -194,7 +201,7 @@ pub fn sidebar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
                     .file_name()
                     .map(|n| n.to_string_lossy().into_owned())
                     .unwrap_or_else(|| p.display().to_string());
-                let resp = ui.selectable_label(false, label);
+                let resp = glyphs::icon_row(ui, folder_icon, &label);
                 drop_target(app, ui, &resp, &p, act);
                 if resp.clicked() {
                     act.navigate = Some(p);
@@ -204,12 +211,12 @@ pub fn sidebar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
         ui.add_space(6.0);
         ui.label(egui::RichText::new("Volumes").weak().small());
         for v in app.volumes.clone() {
-            let label = if v.removable {
-                format!("⏏ {}", v.label)
-            } else {
-                v.label.clone()
-            };
-            let resp = ui.selectable_label(false, label);
+            let resp = glyphs::icon_row(
+                ui,
+                |p, r, c| glyphs::paint_glyph(p, r, glyphs::Glyph::Disk, c),
+                &v.label,
+            )
+            .on_hover_text(v.mount.display().to_string());
             drop_target(app, ui, &resp, &v.mount, act);
             if resp.clicked() {
                 act.navigate = Some(v.mount);
@@ -232,7 +239,7 @@ pub fn tab_bar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
                 .map(|s| s.state.is_loading())
                 .unwrap_or(false);
             let label = if loading {
-                format!("◌ {title}")
+                format!("… {title}")
             } else {
                 title
             };
@@ -254,7 +261,8 @@ pub fn tab_bar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
         if let Some(i) = close_idx {
             act.close_tab = Some(i);
         }
-        if ui.button("＋").on_hover_text("New Tab (⌘T)").clicked() {
+        let new_tab_tip = format!("New Tab ({}+T)", crate::format::MOD_KEY);
+        if glyphs::icon_button(ui, glyphs::Glyph::Plus, &new_tab_tip, true).clicked() {
             act.new_tab = true;
         }
     });
@@ -316,7 +324,7 @@ pub fn status_bar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) 
                 let p = op.progress_snapshot();
                 let frac = p.fraction();
                 ui.horizontal(|ui| {
-                    if ui.small_button("✕").on_hover_text("Cancel").clicked() {
+                    if glyphs::icon_button(ui, glyphs::Glyph::Close, "Cancel", true).clicked() {
                         act.cancel_op = Some(op.id);
                     }
                     let bar = egui::ProgressBar::new(frac.unwrap_or(0.0))

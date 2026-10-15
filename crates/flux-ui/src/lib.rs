@@ -9,6 +9,7 @@ pub mod app;
 pub mod chrome;
 pub mod dialogs;
 pub mod format;
+pub mod glyphs;
 pub mod icon_cache;
 pub mod pane;
 pub mod theme;
@@ -277,6 +278,8 @@ impl FluxApp {
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show_rows(ui, row_h, hits.len(), |ui, range| {
+                let pal = crate::theme::Palette::of(&ui.style().visuals);
+                let icons = self.icons.clone();
                 for i in range {
                     let h = &hits[i];
                     ui.horizontal(|ui| {
@@ -285,8 +288,35 @@ impl FluxApp {
                             .file_name()
                             .map(|n| n.to_string_lossy().into_owned())
                             .unwrap_or_default();
-                        let label = if h.is_dir { format!("📁 {name}") } else { name };
-                        let resp = ui.selectable_label(false, label);
+                        // Painted icon — emoji/font glyphs aren't reliable.
+                        let kind = if h.is_dir {
+                            flux_core::EntryKind::Dir
+                        } else {
+                            flux_core::EntryKind::File
+                        };
+                        let (ir, _) = ui.allocate_exact_size(
+                            egui::Vec2::splat(row_h * 0.6),
+                            egui::Sense::hover(),
+                        );
+                        let key = icon_cache::IconKey::for_entry_path(
+                            kind,
+                            &h.path,
+                        );
+                        match icons.peek(&key) {
+                            Some(tex) => {
+                                ui.painter().image(
+                                    tex,
+                                    ir,
+                                    egui::Rect::from_min_max(
+                                        egui::pos2(0.0, 0.0),
+                                        egui::pos2(1.0, 1.0),
+                                    ),
+                                    egui::Color32::WHITE,
+                                );
+                            }
+                            None => view::paint_entry_icon(ui.painter(), ir, kind, &pal),
+                        }
+                        let resp = ui.selectable_label(false, name);
                         let path_str = h.path.display().to_string();
                         ui.weak(path_str);
                         if resp.double_clicked() {
@@ -496,30 +526,73 @@ impl eframe::App for FluxApp {
 
         // --- Internal drag & drop ---
         if self.dragging.is_some() {
-            // Drag ghost following the cursor.
+            // Translucent row-card ghost following the cursor.
             if let Some(pos) = ctx.pointer_interact_pos() {
-                let n = self.dragging.as_ref().unwrap().items.len();
-                let first = self.dragging.as_ref().unwrap().items[0]
-                    .file_name()
-                    .map(|f| f.to_string_lossy().into_owned())
-                    .unwrap_or_default();
-                let label = if n > 1 {
-                    format!("{first} + {}", n - 1)
-                } else {
-                    first
+                let (label, n, key, kind) = {
+                    let d = self.dragging.as_ref().unwrap();
+                    let first = d.items[0]
+                        .file_name()
+                        .map(|f| f.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    (first, d.items.len(), d.key.clone(), d.kind)
                 };
                 let copy_hint = ctx.input(|i| i.modifiers.alt);
+                let icons = self.icons.clone();
+                let pal = crate::theme::Palette::of(&ctx.style_of(ctx.theme()).visuals);
                 egui::Area::new(egui::Id::new("drag_ghost"))
                     .order(egui::Order::Tooltip)
                     .interactable(false)
                     .fixed_pos(pos + egui::vec2(14.0, 10.0))
                     .show(&ctx, |ui| {
+                        ui.set_opacity(0.78);
                         egui::Frame::popup(ui.style()).show(ui, |ui| {
-                            ui.label(format!(
-                                "{} {}",
-                                label,
-                                if copy_hint { "(copy)" } else { "" }
-                            ));
+                            ui.horizontal(|ui| {
+                                let (ir, _) = ui.allocate_exact_size(
+                                    egui::Vec2::splat(16.0),
+                                    egui::Sense::hover(),
+                                );
+                                match icons.peek(&key) {
+                                    Some(tex) => {
+                                        ui.painter().image(
+                                            tex,
+                                            ir,
+                                            egui::Rect::from_min_max(
+                                                egui::pos2(0.0, 0.0),
+                                                egui::pos2(1.0, 1.0),
+                                            ),
+                                            egui::Color32::WHITE,
+                                        );
+                                    }
+                                    None => view::paint_entry_icon(
+                                        ui.painter(),
+                                        ir,
+                                        kind,
+                                        &pal,
+                                    ),
+                                }
+                                ui.label(&label);
+                                if n > 1 {
+                                    ui.weak(format!("+{}", n - 1));
+                                }
+                                if copy_hint {
+                                    // Finder-style green ⊕ "copy" badge.
+                                    let (br, _) = ui.allocate_exact_size(
+                                        egui::Vec2::splat(13.0),
+                                        egui::Sense::hover(),
+                                    );
+                                    ui.painter().circle_filled(
+                                        br.center(),
+                                        6.5,
+                                        egui::Color32::from_rgb(52, 199, 89),
+                                    );
+                                    glyphs::paint_glyph(
+                                        ui.painter(),
+                                        br.shrink(4.0),
+                                        glyphs::Glyph::Plus,
+                                        egui::Color32::WHITE,
+                                    );
+                                }
+                            });
                         });
                     });
                 ctx.request_repaint();

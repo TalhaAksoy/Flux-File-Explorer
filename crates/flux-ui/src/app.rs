@@ -217,6 +217,10 @@ pub struct FluxApp {
 /// An in-flight drag of file rows.
 pub struct DragState {
     pub items: Vec<PathBuf>,
+    /// Icon key + kind of the first item, captured at drag start so the
+    /// ghost can paint the real icon without touching the filesystem.
+    pub key: crate::icon_cache::IconKey,
+    pub kind: flux_core::EntryKind,
     /// Set once the pointer left the window and the OS drag was started.
     pub handed_to_os: bool,
 }
@@ -577,7 +581,7 @@ impl FluxApp {
     /// already selected. Selects an unselected row first, matching Explorer/
     /// Finder behavior.
     pub fn start_drag_row(&mut self, row: usize) {
-        let items = {
+        let (items, key, kind) = {
             let tab = self.current_tab_mut();
             let s = tab.snap.read().unwrap();
             let Some(idx) = s.row_index(row) else {
@@ -586,15 +590,31 @@ impl FluxApp {
             if !tab.sel.contains(idx) {
                 tab.sel.select_row(&s, row);
             }
-            tab.sel
+            let first = s.entry(idx);
+            let (key, kind) = first
+                .map(|e| {
+                    (
+                        crate::icon_cache::IconKey::for_entry(e, &s.path.join(&e.name)),
+                        e.kind,
+                    )
+                })
+                .unwrap_or((
+                    crate::icon_cache::IconKey::Ext(String::new()),
+                    flux_core::EntryKind::File,
+                ));
+            let items = tab
+                .sel
                 .ids
                 .iter()
                 .filter_map(|&i| s.entry_path(i))
-                .collect::<Vec<_>>()
+                .collect::<Vec<_>>();
+            (items, key, kind)
         };
         if !items.is_empty() {
             self.dragging = Some(DragState {
                 items,
+                key,
+                kind,
                 handed_to_os: false,
             });
         }

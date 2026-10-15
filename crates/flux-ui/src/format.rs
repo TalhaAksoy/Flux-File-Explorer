@@ -49,3 +49,11 @@ pub fn format_count(n: usize) -> String {
     }
     out
 }
+
+/// Display name of the primary shortcut modifier — the bundled font has no
+/// ⌘ glyph, so tooltips say "Cmd"/"Ctrl" instead.
+pub const MOD_KEY: &str = if cfg!(target_os = "macos") {
+    "Cmd"
+} else {
+    "Ctrl"
+};

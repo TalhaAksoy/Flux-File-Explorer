@@ -53,6 +53,28 @@ impl IconKey {
             ),
         }
     }
+
+    /// Key for a bare path + kind (search hits have no `DirEntry`).
+    pub fn for_entry_path(kind: EntryKind, path: &std::path::Path) -> Self {
+        match kind {
+            EntryKind::Dir => {
+                let is_bundle = path
+                    .extension()
+                    .is_some_and(|x| x.eq_ignore_ascii_case(OsStr::new("app")));
+                if is_bundle {
+                    IconKey::Path(path.to_path_buf())
+                } else {
+                    IconKey::Folder
+                }
+            }
+            EntryKind::Symlink => IconKey::Symlink,
+            _ => IconKey::Ext(
+                path.extension()
+                    .map(|x| x.to_string_lossy().to_lowercase())
+                    .unwrap_or_default(),
+            ),
+        }
+    }
 }
 
 enum IconMsg {
@@ -114,6 +136,12 @@ impl IconCache {
         *self.wake_ctx.lock().unwrap() = Some(ctx);
     }
 
+    /// Read-only lookup — never queues a fetch. Used by the drag ghost,
+    /// which must not trigger fetches for its own icon.
+    pub fn peek(&self, key: &IconKey) -> Option<egui::TextureId> {
+        self.map.read().unwrap().get(key).map(|t| t.id())
+    }
+
     /// Look up a texture; if missing, queue a fetch and return None.
     /// `path` is the absolute path used as the fetch's representative.
     pub fn texture(&self, key: &IconKey, path: &std::path::Path) -> Option<egui::TextureId> {
@@ -159,3 +187,27 @@ impl IconCache {
 
 /// UI-thread-only (the receiver and textures are !Sync). Rc, not Arc.
 pub type IconCacheHandle = std::rc::Rc<IconCache>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn icon_roundtrip_via_worker() {
+        let c = IconCache::new();
+        // First call queues the fetch.
+        assert!(c.texture(&IconKey::Folder, Path::new("/tmp")).is_none());
+        // Wait for the worker + pump results into textures.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        let ctx = egui::Context::default();
+        loop {
+            if c.pump(&ctx) > 0 {
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline, "icon never arrived");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(c.texture(&IconKey::Folder, Path::new("/tmp")).is_some());
+    }
+}
