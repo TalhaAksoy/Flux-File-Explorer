@@ -434,22 +434,49 @@ impl eframe::App for FluxApp {
         }
 
         let mut act = ChromeAction::default();
-        egui::Panel::top("toolbar").show(ui, |ui| {
-            chrome::toolbar(self, ui, &mut act);
-        });
-        egui::Panel::top("tabs").show(ui, |ui| {
-            chrome::tab_bar(self, ui, &mut act);
-        });
+        // Zones separate by tonal step, not ruled lines: sidebar recessed,
+        // chrome raised, content neutral. `show_separator_line(false)` removes
+        // the hard 1px edge (resize line still appears while dragging).
+        let dark = ctx.style_of(ctx.theme()).visuals.dark_mode;
+        let chrome_frame = egui::Frame::default()
+            .fill(theme::chrome_fill(dark))
+            .inner_margin(egui::Margin::symmetric(10, 7));
+        let tabs_frame = egui::Frame::default()
+            .fill(theme::chrome_fill(dark))
+            .inner_margin(egui::Margin::symmetric(10, 2));
+        let status_frame = egui::Frame::default()
+            .fill(theme::chrome_fill(dark))
+            .inner_margin(egui::Margin::symmetric(10, 4));
+        let side_frame = egui::Frame::default()
+            .fill(theme::sidebar_fill(dark))
+            .inner_margin(egui::Margin::symmetric(8, 6));
+        egui::Panel::top("toolbar")
+            .show_separator_line(false)
+            .frame(chrome_frame)
+            .show(ui, |ui| {
+                chrome::toolbar(self, ui, &mut act);
+            });
+        egui::Panel::top("tabs")
+            .show_separator_line(false)
+            .frame(tabs_frame)
+            .show(ui, |ui| {
+                chrome::tab_bar(self, ui, &mut act);
+            });
         egui::Panel::left("sidebar")
             .resizable(true)
             .default_size(self.settings.sidebar_width)
             .size_range(120.0..=320.0)
+            .show_separator_line(false)
+            .frame(side_frame)
             .show(ui, |ui| {
                 chrome::sidebar(self, ui, &mut act);
             });
-        egui::Panel::bottom("status").show(ui, |ui| {
-            chrome::status_bar(self, ui, &mut act);
-        });
+        egui::Panel::bottom("status")
+            .show_separator_line(false)
+            .frame(status_frame)
+            .show(ui, |ui| {
+                chrome::status_bar(self, ui, &mut act);
+            });
         egui::CentralPanel::default().show(ui, |ui| {
             if self.search_ui.active {
                 self.search_view(ui);

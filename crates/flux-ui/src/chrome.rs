@@ -52,6 +52,16 @@ fn drop_target(app: &FluxApp, ui: &egui::Ui, resp: &egui::Response, dir: &std::p
 
 /// Top toolbar: nav buttons, breadcrumb / editable path, filter field.
 pub fn toolbar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
+    // Toolbar chrome runs larger than the file list — primary navigation
+    // deserves bigger hit targets and text. Scoped to this Ui only.
+    {
+        let st = ui.style_mut();
+        st.spacing.interact_size.y = 30.0;
+        st.text_styles
+            .insert(egui::TextStyle::Body, egui::FontId::proportional(15.0));
+        st.text_styles
+            .insert(egui::TextStyle::Button, egui::FontId::proportional(14.5));
+    }
     ui.horizontal(|ui| {
         let tab = app.current_tab();
         let can_back = tab.history.can_back();
@@ -227,6 +237,12 @@ pub fn sidebar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
 
 /// Tab strip above the table.
 pub fn tab_bar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
+    {
+        let st = ui.style_mut();
+        st.spacing.interact_size.y = 26.0;
+        st.text_styles
+            .insert(egui::TextStyle::Body, egui::FontId::proportional(14.0));
+    }
     ui.horizontal(|ui| {
         let n = app.tabs.len();
         let mut close_idx = None;

@@ -63,6 +63,26 @@ impl Palette {
     }
 }
 
+/// Fill for the top/bottom chrome — a subtle step *lighter* than the
+/// content background, so zones read as raised surface rather than being
+/// separated by ruled lines.
+pub fn chrome_fill(dark: bool) -> Color32 {
+    if dark {
+        Color32::from_rgb(33, 35, 41)
+    } else {
+        Color32::from_rgb(251, 252, 255)
+    }
+}
+
+/// Sidebar fill — one step *recessed* below the content background.
+pub fn sidebar_fill(dark: bool) -> Color32 {
+    if dark {
+        Color32::from_rgb(22, 23, 27)
+    } else {
+        Color32::from_rgb(240, 242, 247)
+    }
+}
+
 pub fn apply_theme(ctx: &egui::Context, dark: bool) {
     let visuals = if dark {
         let mut v = Visuals::dark();
@@ -74,6 +94,9 @@ pub fn apply_theme(ctx: &egui::Context, dark: bool) {
         v.selection.stroke = Stroke::new(1.0, Color32::from_rgb(110, 160, 255));
         v.hyperlink_color = Color32::from_rgb(110, 165, 255);
         v.widgets.noninteractive.fg_stroke.color = Color32::from_rgb(212, 216, 224);
+        // Softer widget outlines — field borders shouldn't scream.
+        v.widgets.noninteractive.bg_stroke =
+            Stroke::new(1.0, Color32::from_rgb(54, 56, 63));
         v
     } else {
         let mut v = Visuals::light();
@@ -82,6 +105,8 @@ pub fn apply_theme(ctx: &egui::Context, dark: bool) {
         v.extreme_bg_color = Color32::from_rgb(238, 240, 244);
         v.selection.bg_fill = Color32::from_rgb(205, 222, 250);
         v.selection.stroke = Stroke::new(1.0, Color32::from_rgb(60, 115, 220));
+        v.widgets.noninteractive.bg_stroke =
+            Stroke::new(1.0, Color32::from_rgb(219, 222, 229));
         v
     };
     let mut style = Style {
