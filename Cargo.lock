@@ -1454,6 +1454,7 @@ dependencies = [
  "flux-core",
  "flux-operations",
  "serde_json",
+ "tempfile",
  "tracing",
 ]
 

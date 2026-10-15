@@ -49,5 +49,53 @@ fn bench_cmp(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, bench_view, bench_cmp);
+/// Cost of the compute worker's input capture: cloning the entry list
+/// under a read lock is the price for never holding a write lock during
+/// sorting. Reported so the trade stays visible.
+fn bench_entry_clone(c: &mut Criterion) {
+    let mut group = c.benchmark_group("entry_clone");
+    for n in [10_000usize, 100_000] {
+        let entries = make_entries(n);
+        group.bench_with_input(BenchmarkId::from_parameter(n), &entries, |b, entries| {
+            b.iter(|| entries.to_vec());
+        });
+    }
+    group.finish();
+}
+
+/// End-to-end directory enumeration on the real filesystem — measures the
+/// eager-stat vs lazy-metadata difference. Directory creation is outside
+/// the timed section; only the enum-to-finish time counts.
+fn bench_enumerate(c: &mut Criterion) {
+    let mut group = c.benchmark_group("enumerate");
+    for n in [2_000usize, 10_000] {
+        let dir = tempfile::tempdir().unwrap();
+        for i in 0..n {
+            std::fs::write(dir.path().join(format!("f{i:06}.txt")), b"x").unwrap();
+        }
+        let path = dir.path().to_path_buf();
+        group.bench_with_input(BenchmarkId::from_parameter(n), &path, |b, path| {
+            b.iter(|| {
+                let snap = flux_core::DirSnapshot::handle(path.clone());
+                let engine = flux_core::EnumEngine::new();
+                let gen_id0 = engine.navigate(&snap, path.clone());
+                // Spin until Finished (or the snapshot reports Ready).
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+                loop {
+                    let done = engine.drain_events().any(|e| matches!(
+                        e,
+                        flux_core::EnumEvent::Finished { gen_id, .. } if gen_id == gen_id0
+                    ));
+                    if done || std::time::Instant::now() > deadline {
+                        break;
+                    }
+                    std::hint::spin_loop();
+                }
+            });
+        });
+    }
+    group.finish();
+}
+
+criterion_group!(benches, bench_view, bench_cmp, bench_entry_clone, bench_enumerate);
 criterion_main!(benches);

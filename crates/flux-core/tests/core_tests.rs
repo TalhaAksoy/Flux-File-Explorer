@@ -7,7 +7,7 @@ use std::time::{Duration, Instant, SystemTime};
 use flux_core::entry::{DirEntry, EntryKind, contains_case_insensitive, is_hidden_name};
 use flux_core::snapshot::DirSnapshot;
 use flux_core::sort::{SortDir, SortKey, SortSpec, build_view, folded_cmp, natural_cmp};
-use flux_core::{EnumEngine, EnumEvent, UNKNOWN_SIZE};
+use flux_core::{EnumEngine, EnumEvent, MetaEngine, MetaEvent, UNKNOWN_SIZE};
 
 fn entry(name: &str, kind: EntryKind, size: u64) -> DirEntry {
     DirEntry {
@@ -226,6 +226,39 @@ fn engine_enumerates_real_directory() {
 }
 
 #[test]
+fn meta_engine_fills_sizes_and_mtimes() {
+    let (_tmp, path) = make_dir_with_files(300);
+    let enum_engine = EnumEngine::new();
+    let meta = MetaEngine::new();
+    let snap = DirSnapshot::handle(path.clone());
+    let gen_id = enum_engine.navigate(&snap, path);
+    let (_t, ok) = collect_until_done(&enum_engine, gen_id, Duration::from_secs(10));
+    assert!(ok);
+    // Lazy enumeration leaves metadata unknown.
+    assert!(snap.read().unwrap().entries().iter().all(|e| {
+        e.is_dir() || e.size == flux_core::UNKNOWN_SIZE
+    }));
+    meta.fill(&snap, gen_id);
+    // Wait for MetaEvent::Finished.
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let mut finished = false;
+    while Instant::now() < deadline && !finished {
+        for ev in meta.drain_events() {
+            if matches!(ev, MetaEvent::Finished { gen_id: g } if g == gen_id) {
+                finished = true;
+            }
+        }
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    assert!(finished, "meta fill did not finish");
+    let s = snap.read().unwrap();
+    let file = s.entries().iter().find(|e| e.name == "f000000.txt").unwrap();
+    assert_eq!(file.size, 1);
+    assert!(file.mtime.is_some());
+    assert!(s.entries().iter().all(|e| e.is_dir() || e.size != flux_core::UNKNOWN_SIZE));
+}
+
+#[test]
 fn rapid_navigation_only_last_generation_wins() {
     let (_t1, p1) = make_dir_with_files(50);
     let (_t2, p2) = make_dir_with_files(60);
@@ -239,6 +272,77 @@ fn rapid_navigation_only_last_generation_wins() {
     assert!(ok);
     assert_eq!(total, 71, "final dir must win (70 files + 1 subdir)");
     assert_eq!(snap.read().unwrap().path, p3);
+}
+
+// ---------- compute worker locking ----------
+
+/// A UI reader must never wait for a full sort of a huge directory.
+/// The compute worker captures inputs under a read lock, sorts unlocked,
+/// and only holds the write lock for the final swap — so read-acquire
+/// latency stays at milliseconds, not the ~140ms a 100k sort takes.
+#[test]
+fn sorting_does_not_block_ui_snapshot_reads() {
+    let snap = DirSnapshot::handle(PathBuf::from("/tmp/x"));
+    {
+        let mut s = snap.write().unwrap();
+        s.begin_load(PathBuf::from("/tmp/x"), 7);
+        for chunk in 0..25 {
+            let mut batch: Vec<DirEntry> = (0..4_000)
+                .map(|i| entry(&format!("f{:06}.txt", chunk * 4_000 + i), EntryKind::File, 1))
+                .collect();
+            s.push_batch(&mut batch);
+        }
+        s.finish();
+    }
+    assert_eq!(snap.read().unwrap().entry_count(), 100_000);
+
+    let engine = flux_core::ComputeEngine::new();
+    let mut worst = Duration::ZERO;
+    for _ in 0..40 {
+        engine.rebuild(&snap, 7); // keep the worker saturated
+        let t = Instant::now();
+        {
+            let s = snap.read().unwrap();
+            std::hint::black_box(s.view_len());
+        }
+        worst = worst.max(t.elapsed());
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert!(
+        worst < Duration::from_millis(120),
+        "UI read stalled {worst:?} — the write lock was held during sorting"
+    );
+}
+
+#[test]
+fn stale_view_rebuild_is_discarded() {
+    let snap = DirSnapshot::handle(PathBuf::from("/tmp/y"));
+    {
+        let mut s = snap.write().unwrap();
+        s.begin_load(PathBuf::from("/tmp/y"), 3);
+        s.push_batch(&mut vec![
+            entry("b", EntryKind::File, 1),
+            entry("a", EntryKind::File, 1),
+        ]);
+        s.finish();
+    }
+    let engine = flux_core::ComputeEngine::new();
+    // Queue a rebuild then immediately mutate — the stale result must not
+    // overwrite the newer snapshot state.
+    engine.rebuild(&snap, 3);
+    {
+        let mut s = snap.write().unwrap();
+        s.push_batch(&mut vec![entry("z-new", EntryKind::File, 1)]);
+    }
+    engine.rebuild(&snap, 3);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline {
+        if snap.read().unwrap().view_len() == 3 {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    panic!("sorted view never applied");
 }
 
 #[test]

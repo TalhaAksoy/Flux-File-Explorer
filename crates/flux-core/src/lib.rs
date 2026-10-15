@@ -12,7 +12,7 @@ pub mod sort;
 
 pub use compute::{ComputeEngine, ComputeEvent, ViewRequest};
 pub use entry::{DirEntry, EntryKind};
-pub use enumerate::{EnumEngine, EnumEvent};
+pub use enumerate::{EnumEngine, EnumEvent, MetaEngine, MetaEvent};
 pub use snapshot::{DirSnapshot, LoadState, SnapshotHandle};
 pub use sort::{SortDir, SortKey, SortSpec};
 

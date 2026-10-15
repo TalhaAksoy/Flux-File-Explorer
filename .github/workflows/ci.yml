@@ -1,0 +1,98 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  test:
+    name: ${{ matrix.os }} — fmt, clippy, test, build
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config \
+            libxkbcommon-dev libxkbcommon-x11-dev \
+            libwayland-dev libxcb1-dev \
+            libegl1-mesa-dev libgl1-mesa-dev
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Format
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets
+
+      - name: Test
+        run: cargo test --workspace
+
+      - name: Build (release)
+        run: cargo build --release -p flux-app
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: flux-files-${{ matrix.os }}
+          path: |
+            target/release/flux-files
+            target/release/flux-files.exe
+          if-no-files-found: ignore
+          retention-days: 14
+
+  smoke-linux:
+    name: Linux headless smoke test (xvfb)
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config \
+            libxkbcommon-dev libxkbcommon-x11-dev \
+            libwayland-dev libxcb1-dev \
+            libegl1-mesa-dev libgl1-mesa-dev \
+            xvfb mesa-utils
+      - name: Build
+        run: cargo build -p flux-app
+      - name: Smoke-run under Xvfb
+        run: |
+          export LIBGL_ALWAYS_SOFTWARE=1
+          timeout 25 xvfb-run -a target/debug/flux-files || code=$?
+          # A timeout kill is success: the app stayed up (exit 124).
+          if [ "${code:-0}" != "0" ] && [ "${code:-0}" != "124" ]; then
+            echo "app exited abnormally: $code"; exit 1
+          fi

@@ -166,24 +166,24 @@ fn run_scan(
             Err(_) => continue, // entry vanished mid-scan; skip
         };
         let name = ent.file_name();
-        let kind = match ent.file_type() {
-            Ok(ft) if ft.is_dir() => EntryKind::Dir,
-            Ok(ft) if ft.is_symlink() => EntryKind::Symlink,
-            Ok(ft) if ft.is_file() => EntryKind::File,
-            _ => EntryKind::Other,
+        // Lazy metadata: `file_type()` is free on virtually every filesystem
+        // (it rides along in the dirent). size/mtime/readonly are deferred
+        // to the MetaEngine so names reach the UI as fast as the filesystem
+        // can list them; `Other` (undetermined type) stats once eagerly
+        // because a reliable kind is needed for sorting and icons.
+        let (kind, eager_meta) = match ent.file_type() {
+            Ok(ft) if ft.is_dir() => (EntryKind::Dir, None),
+            Ok(ft) if ft.is_symlink() => (EntryKind::Symlink, None),
+            Ok(ft) if ft.is_file() => (EntryKind::File, None),
+            _ => (EntryKind::Other, ent.metadata().ok()),
         };
-        // One stat per entry: gives size/mtime/readonly without following
-        // symlinks. Failures degrade to unknown fields, never abort the scan.
-        let (size, mtime, readonly) = match ent.metadata() {
-            Ok(md) => {
-                let size = if kind == EntryKind::Dir || kind == EntryKind::Symlink {
-                    crate::UNKNOWN_SIZE
-                } else {
-                    md.len()
-                };
-                (size, md.modified().ok(), md.permissions().readonly())
-            }
-            Err(_) => (crate::UNKNOWN_SIZE, None, false),
+        let (size, mtime, readonly) = match eager_meta {
+            Some(md) => (
+                crate::UNKNOWN_SIZE,
+                md.modified().ok(),
+                md.permissions().readonly(),
+            ),
+            None => (crate::UNKNOWN_SIZE, None, false),
         };
         batch.push(DirEntry {
             hidden: is_hidden_name(&name),
@@ -228,4 +228,205 @@ fn flush_batch(
     if total > 0 {
         let _ = ev_tx.try_send(EnumEvent::Batch { gen_id, total });
     }
+}
+
+// ---------------------------------------------------------------------------
+// Deferred metadata fill
+// ---------------------------------------------------------------------------
+
+/// Entries statted per apply/signal step. Same reasoning as `BATCH_SIZE`:
+/// large enough to amortize locking, small enough to stay responsive.
+const META_BATCH: usize = 1024;
+
+/// Progress notifications from the metadata worker.
+#[derive(Debug)]
+pub enum MetaEvent {
+    /// `done` of `total` entries now have real size/mtime/readonly.
+    Batch { gen_id: u64, done: usize, total: usize },
+    /// All entries processed (or no stat needed). Triggers the final sort.
+    Finished { gen_id: u64 },
+    /// Job aborted — a newer job or navigation superseded it.
+    Superseded { gen_id: u64 },
+}
+
+struct MetaRequest {
+    snap: SnapshotHandle,
+    gen_id: u64,
+}
+
+/// Background `lstat` filler for entries enumerated with unknown metadata.
+/// One bounded worker; latest-request-wins like [`EnumEngine`]. The UI can
+/// steer work with [`MetaEngine::set_priority`] so the visible range is
+/// statted before the rest.
+pub struct MetaEngine {
+    req_tx: mpsc::Sender<MetaRequest>,
+    cur_gen: Arc<AtomicU64>,
+    /// Packed `(start << 32) | end` index range the UI wants first; 0 means
+    /// none. Written by the UI every scroll, read by the worker per chunk.
+    priority: Arc<AtomicU64>,
+    event_rx: mpsc::Receiver<MetaEvent>,
+    _worker: JoinHandle<()>,
+}
+
+impl Default for MetaEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl MetaEngine {
+    pub fn new() -> Self {
+        let (req_tx, req_rx) = mpsc::channel::<MetaRequest>();
+        let (ev_tx, event_rx) = mpsc::sync_channel::<MetaEvent>(8192);
+        let cur_gen = Arc::new(AtomicU64::new(0));
+        let priority = Arc::new(AtomicU64::new(0));
+        let gen_w = Arc::clone(&cur_gen);
+        let pri_w = Arc::clone(&priority);
+        let worker = std::thread::Builder::new()
+            .name("flux-meta".into())
+            .spawn(move || meta_worker_loop(req_rx, ev_tx, gen_w, pri_w))
+            .expect("spawn meta worker");
+        Self {
+            req_tx,
+            cur_gen,
+            priority,
+            event_rx,
+            _worker: worker,
+        }
+    }
+
+    /// Fill metadata for every entry of `snap` (generation `gen_id`).
+    /// Called by the UI when enumeration finishes.
+    pub fn fill(&self, snap: &SnapshotHandle, gen_id: u64) {
+        let job = self.cur_gen.fetch_add(1, Ordering::SeqCst) + 1;
+        let _ = self.req_tx.send(MetaRequest {
+            snap: snap.clone(),
+            gen_id,
+        });
+        debug_assert!(job > 0);
+    }
+
+    /// Stat the snapshot index range `start..end` before the rest. Called on
+    /// every scroll; costs one atomic store.
+    pub fn set_priority(&self, start: u32, end: u32) {
+        self.priority
+            .store((u64::from(start) << 32) | u64::from(end), Ordering::Relaxed);
+    }
+
+    pub fn cancel_current(&self) {
+        self.cur_gen.fetch_add(1, Ordering::SeqCst);
+    }
+
+    pub fn drain_events(&self) -> impl Iterator<Item = MetaEvent> + '_ {
+        self.event_rx.try_iter()
+    }
+}
+
+fn meta_worker_loop(
+    req_rx: mpsc::Receiver<MetaRequest>,
+    ev_tx: mpsc::SyncSender<MetaEvent>,
+    cur_gen: Arc<AtomicU64>,
+    priority: Arc<AtomicU64>,
+) {
+    // Latest request wins; superseded jobs are discarded, not reported —
+    // the stale snapshot's generation check would ignore their data anyway.
+    while let Ok(mut req) = req_rx.recv() {
+        while let Ok(newer) = req_rx.try_recv() {
+            req = newer;
+        }
+        run_fill(&req, &ev_tx, &cur_gen, &priority);
+    }
+}
+
+fn run_fill(
+    req: &MetaRequest,
+    ev_tx: &mpsc::SyncSender<MetaEvent>,
+    cur_gen: &Arc<AtomicU64>,
+    priority: &Arc<AtomicU64>,
+) {
+    let gen_id = req.gen_id;
+    let job_gen = cur_gen.load(Ordering::SeqCst);
+    let is_current = || {
+        cur_gen.load(Ordering::SeqCst) == job_gen
+            && req.snap.read().map(|s| s.generation == gen_id).unwrap_or(false)
+    };
+    if !is_current() {
+        let _ = ev_tx.try_send(MetaEvent::Superseded { gen_id });
+        return;
+    }
+    let (path, count) = match req.snap.read() {
+        Ok(s) => (s.path.clone(), s.entry_count()),
+        Err(_) => return,
+    };
+    if count == 0 {
+        let _ = ev_tx.try_send(MetaEvent::Finished { gen_id });
+        return;
+    }
+    let mut done_marks = vec![false; count];
+    let mut done = 0usize;
+    let mut cursor = 0usize;
+    let mut batch: Vec<(u32, u64, Option<std::time::SystemTime>, bool)> =
+        Vec::with_capacity(META_BATCH);
+
+    while done < count {
+        if !is_current() {
+            let _ = ev_tx.try_send(MetaEvent::Superseded { gen_id });
+            return;
+        }
+        batch.clear();
+        // Pick this chunk's indices: priority range first, then sequential.
+        let mut idxs: Vec<u32> = Vec::with_capacity(META_BATCH);
+        let pri = priority.load(Ordering::Relaxed);
+        let (ps, pe) = ((pri >> 32) as usize, (pri & 0xFFFF_FFFF) as usize);
+        for (i, mark) in done_marks.iter().enumerate().take(pe.min(count)).skip(ps) {
+            if !mark && idxs.len() < META_BATCH {
+                idxs.push(i as u32);
+            }
+        }
+        while idxs.len() < META_BATCH && cursor < count {
+            if !done_marks[cursor] {
+                idxs.push(cursor as u32);
+            }
+            cursor += 1;
+        }
+        if idxs.is_empty() {
+            break;
+        }
+        // Grab (name, kind) under one short read lock; stat outside all locks.
+        let infos: Vec<(std::ffi::OsString, EntryKind)> = match req.snap.read() {
+            Ok(s) if s.generation == gen_id => idxs
+                .iter()
+                .filter_map(|&i| s.entries().get(i as usize).map(|e| (e.name.clone(), e.kind)))
+                .collect(),
+            _ => return,
+        };
+        for (slot, (name, kind)) in infos.iter().enumerate() {
+            let i = idxs[slot];
+            if let Ok(md) = std::fs::symlink_metadata(path.join(name)) {
+                batch.push((
+                    i,
+                    if *kind == EntryKind::File { md.len() } else { crate::UNKNOWN_SIZE },
+                    md.modified().ok(),
+                    md.permissions().readonly(),
+                ));
+            }
+            done_marks[i as usize] = true;
+            done += 1;
+        }
+        if !batch.is_empty() {
+            match req.snap.write() {
+                Ok(mut s) if s.generation == gen_id => s.apply_meta(&batch),
+                _ => {
+                    let _ = ev_tx.try_send(MetaEvent::Superseded { gen_id });
+                    return;
+                }
+            }
+        }
+        let _ = ev_tx.try_send(MetaEvent::Batch {
+            gen_id,
+            done,
+            total: count,
+        });
+    }
+    let _ = ev_tx.try_send(MetaEvent::Finished { gen_id });
 }

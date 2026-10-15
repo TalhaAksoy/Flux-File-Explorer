@@ -5,9 +5,9 @@
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use flux_core::enumerate::EnumEvent;
+use flux_core::enumerate::{EnumEvent, MetaEvent};
 use flux_core::snapshot::SnapshotHandle;
-use flux_core::{ComputeEngine, ComputeEvent, EnumEngine, SortSpec};
+use flux_core::{ComputeEngine, ComputeEvent, EnumEngine, MetaEngine, SortKey, SortSpec};
 use flux_operations::engine::OpEvent;
 use flux_operations::{ConflictQuery, OpEngine, OpKind, OpState};
 use flux_platform::{FsWatcher, Volume, mounted_volumes};
@@ -174,6 +174,7 @@ pub const COMMANDS: &[Command] = &[
 
 pub struct FluxApp {
     pub enum_engine: EnumEngine,
+    pub meta_engine: MetaEngine,
     pub compute: ComputeEngine,
     pub ops: OpEngine,
     pub search_engine: SearchEngine,
@@ -279,6 +280,7 @@ impl FluxApp {
         };
         Self {
             enum_engine: EnumEngine::new(),
+            meta_engine: MetaEngine::new(),
             compute: ComputeEngine::new(),
             ops: OpEngine::new(),
             search_engine: SearchEngine::new(),
@@ -471,6 +473,7 @@ impl FluxApp {
             return;
         }
         self.enum_engine.cancel_current();
+        self.meta_engine.cancel_current();
         self.tabs.remove(idx);
         if self.active >= self.tabs.len() {
             self.active = self.tabs.len() - 1;
@@ -750,6 +753,8 @@ impl FluxApp {
                         if tab.gen_id == gen_id {
                             // Final global sort on the compute thread.
                             self.compute.rebuild(&tab.snap, gen_id);
+                            // Deferred metadata: stat entries in background.
+                            self.meta_engine.fill(&tab.snap, gen_id);
                             if let Some(names) = tab.reselect_after_load.take() {
                                 tab.pending_reselect = Some(names);
                             }
@@ -768,6 +773,28 @@ impl FluxApp {
                 _ => {}
             }
             ctx.request_repaint();
+        }
+        // Metadata-fill events: sizes/dates arrive progressively — repaint to
+        // show them; on finish, rebuild the view if the sort depends on
+        // metadata so the final order is exact.
+        for ev in self.meta_engine.drain_events().collect::<Vec<_>>() {
+            match ev {
+                MetaEvent::Batch { .. } => ctx.request_repaint(),
+                MetaEvent::Finished { gen_id } => {
+                    for tab in &mut self.tabs {
+                        if tab.gen_id == gen_id
+                            && matches!(
+                                tab.snap.read().map(|s| s.sort.key),
+                                Ok(SortKey::Size | SortKey::Modified)
+                            )
+                        {
+                            self.compute.rebuild(&tab.snap, gen_id);
+                        }
+                    }
+                    ctx.request_repaint();
+                }
+                MetaEvent::Superseded { .. } => {}
+            }
         }
         // Compute events: apply deferred reselection + repaint.
         let compute_events: Vec<_> = self.compute.drain_events().collect();

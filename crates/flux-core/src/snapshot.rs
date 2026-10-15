@@ -104,6 +104,23 @@ impl DirSnapshot {
         self.version += 1;
     }
 
+    /// Apply background-statted metadata to entries in place. Indices are
+    /// stable (entries are append-only), so this is safe mid-view. The
+    /// version bump lets in-flight compute work notice fresher data.
+    pub fn apply_meta(
+        &mut self,
+        items: &[(EntryIdx, u64, Option<std::time::SystemTime>, bool)],
+    ) {
+        for &(i, size, mtime, readonly) in items {
+            if let Some(e) = self.entries.get_mut(i as usize) {
+                e.size = size;
+                e.mtime = mtime;
+                e.readonly = readonly;
+            }
+        }
+        self.version += 1;
+    }
+
     pub fn finish(&mut self) {
         self.state = LoadState::Ready {
             total: self.entries.len(),
