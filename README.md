@@ -30,6 +30,7 @@ blocking filesystem calls stay on workers; the UI thread only renders.
 
 ```sh
 cargo build --release -p flux-app    # binary: target/release/flux-files
+./target/release/flux-files [dir]    # optional start directory
 cargo test --workspace               # 34 tests (core, operations, search)
 cargo bench -p flux-bench            # sort/view micro-benchmarks
 ```
@@ -50,6 +51,10 @@ and criterion. Numbers are from this machine; re-run to verify.
 
 Cold launch: window open in well under a second; ~110 MiB RSS including the
 GPU context and font atlas; 0.0% CPU at idle (repaint is event-driven).
+Live app smoke test with the 100k dir loaded: ~120 MiB RSS, stable, 0% CPU.
+
+Copy throughput (APFS, clonefile-capable `fs::copy` path): 1.4 GiB/s on
+200×512KiB files. Same-filesystem moves are metadata-only renames.
 
 ## Working today
 

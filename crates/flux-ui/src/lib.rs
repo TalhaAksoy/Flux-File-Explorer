@@ -446,10 +446,10 @@ impl eframe::App for FluxApp {
             }
         });
 
-        // Row context menu overlay.
-        if let Some(pos) = self.context_menu_pos.take() {
+        // Row context menu overlay; persists until a click outside it.
+        if let Some(pos) = self.context_menu_pos {
             let items = self.actionable_paths();
-            egui::Area::new(egui::Id::new("row_ctx"))
+            let inner = egui::Area::new(egui::Id::new("row_ctx"))
                 .order(egui::Order::Foreground)
                 .fixed_pos(pos)
                 .show(&ctx, |ui| {
@@ -458,7 +458,24 @@ impl eframe::App for FluxApp {
                         dialogs::row_context_menu(self, ui, &items);
                     });
                 });
-                    }
+            let menu_rect = inner.response.rect;
+            let clicked_elsewhere = ctx.input(|i| {
+                i.pointer.any_pressed()
+                    && i.pointer
+                        .interact_pos()
+                        .is_some_and(|p| !menu_rect.contains(p))
+            });
+            // A release inside the menu means an item was clicked — dismiss.
+            let item_chosen = ctx.input(|i| {
+                i.pointer.primary_released()
+                    && i.pointer
+                        .interact_pos()
+                        .is_some_and(|p| menu_rect.contains(p))
+            });
+            if clicked_elsewhere || item_chosen {
+                self.context_menu_pos = None;
+            }
+        }
 
         // Apply chrome intents.
         if let Some(p) = act.navigate {
@@ -518,10 +535,10 @@ impl eframe::App for FluxApp {
 
         // Debounced recursive search trigger.
         if self.search_ui.active
-            && self.search_ui.running
+            && self.search_ui.dirty
             && self.search_ui.last_edit.elapsed() > Duration::from_millis(350)
         {
-            self.search_ui.running = false; // mark issued; events set running again? no — search_ui.running means "waiting to issue" OR "in flight"
+            self.search_ui.dirty = false;
             let text = self.filter_text.clone();
             self.search_ui.hits.clear();
             if !text.is_empty() {
@@ -559,8 +576,8 @@ impl eframe::App for FluxApp {
     fn save(&mut self, _storage: &mut dyn eframe::Storage) {}
 }
 
-/// Launch the app.
-pub fn run() -> eframe::Result<()> {
+/// Launch the app. `start_dir` overrides the restored session path.
+pub fn run(start_dir: Option<PathBuf>) -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("Flux Files")
@@ -573,7 +590,10 @@ pub fn run() -> eframe::Result<()> {
         "Flux Files",
         options,
         Box::new(|cc| {
-            let app = FluxApp::new();
+            let mut app = FluxApp::new();
+            if let Some(d) = start_dir.filter(|d| d.is_dir()) {
+                app.navigate(d);
+            }
             theme::apply_theme(&cc.egui_ctx, app.dark);
             Ok(Box::new(app))
         }),

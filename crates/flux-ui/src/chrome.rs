@@ -122,7 +122,7 @@ pub fn toolbar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
             if resp.changed() {
                 if app.search_ui.active {
                     app.search_ui.last_edit = std::time::Instant::now();
-                    app.search_ui.running = true;
+                    app.search_ui.dirty = true;
                 } else {
                     act.set_filter = Some(app.filter_text.clone());
                 }

@@ -124,7 +124,10 @@ impl BulkRenameState {
 pub struct SearchUi {
     pub active: bool,
     pub hits: Vec<SearchHit>,
+    /// A query is in flight on the search worker.
     pub running: bool,
+    /// Text changed since the last issued query (debounce flag).
+    pub dirty: bool,
     pub last_edit: Instant,
 }
 
@@ -134,6 +137,7 @@ impl Default for SearchUi {
             active: false,
             hits: Vec::new(),
             running: false,
+            dirty: false,
             last_edit: Instant::now(),
         }
     }

@@ -5,5 +5,7 @@ fn main() -> eframe::Result<()> {
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn")),
         )
         .init();
-    flux_ui::run()
+    // Optional positional arg: initial directory.
+    let start = std::env::args().nth(1).map(std::path::PathBuf::from);
+    flux_ui::run(start)
 }

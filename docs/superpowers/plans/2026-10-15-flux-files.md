@@ -1,5 +1,15 @@
 # Flux Files — Milestone Implementation Plan
 
+**Status (2026-10): Milestone 1 COMPLETE + ops/search/settings implemented.**
+- Workspace builds clean: `cargo check`, `cargo clippy` 0 warnings, `cargo test` 34/34 green.
+- Real benchmarks (Apple Silicon, release): 100k-entry dir → first batch 2.5ms,
+  full enumeration 243ms, view sort 206ms (background thread), 7.5MiB model,
+  ~120MiB app RSS with dir loaded, 0% idle CPU. Copy: 1.4GiB/s (APFS clonefile).
+- egui/eframe 0.36 migration done (`Panel::top/left`, `App::ui()/logic()`).
+- Verified launch: `target/release/flux-files /tmp/flux_bench_100k`.
+- Not yet validated: Windows/Linux builds, scrolling feel under load (needs
+  human interaction), native file icons.
+
 > Executed inline per user's explicit autonomous-execution instruction ("Start implementing",
 > "make reasonable engineering decisions independently"). Spec = user's project brief.
 
