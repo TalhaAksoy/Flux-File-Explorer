@@ -35,6 +35,8 @@ pub struct ChromeAction {
     /// Directory widget currently hovered while a file drag is active —
     /// the drop target on release.
     pub drop_target: Option<PathBuf>,
+    /// Sidebar context menu → open this path in a new tab.
+    pub new_tab_at: Option<PathBuf>,
 }
 
 /// During a drag, mark `resp` as a drop target for `dir` when hovered and
@@ -182,6 +184,16 @@ pub fn sidebar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
         ui.label(egui::RichText::new("Places").weak().small());
         for (label, path) in app.known.clone() {
             let resp = glyphs::icon_row(ui, folder_icon, label);
+            resp.context_menu(|ui| {
+                if ui.button("Open").clicked() {
+                    act.navigate = Some(path.clone());
+                    ui.close();
+                }
+                if ui.button("Open in New Tab").clicked() {
+                    act.new_tab_at = Some(path.clone());
+                    ui.close();
+                }
+            });
             drop_target(app, ui, &resp, &path, act);
             if resp.clicked() {
                 act.navigate = Some(path);
@@ -197,6 +209,16 @@ pub fn sidebar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
                     .unwrap_or_else(|| p.display().to_string());
                 let resp = glyphs::icon_row(ui, folder_icon, &label)
                     .on_hover_text(p.display().to_string());
+                resp.context_menu(|ui| {
+                    if ui.button("Open").clicked() {
+                        act.navigate = Some(p.clone());
+                        ui.close();
+                    }
+                    if ui.button("Open in New Tab").clicked() {
+                        act.new_tab_at = Some(p.clone());
+                        ui.close();
+                    }
+                });
                 drop_target(app, ui, &resp, &p, act);
                 if resp.clicked() {
                     act.navigate = Some(p);
@@ -206,16 +228,36 @@ pub fn sidebar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
         if !app.settings.bookmarks.is_empty() {
             ui.add_space(6.0);
             ui.label(egui::RichText::new("Bookmarks").weak().small());
+            let mut unpin: Option<PathBuf> = None;
             for p in app.settings.bookmarks.clone() {
                 let label = p
                     .file_name()
                     .map(|n| n.to_string_lossy().into_owned())
                     .unwrap_or_else(|| p.display().to_string());
-                let resp = glyphs::icon_row(ui, folder_icon, &label);
+                let resp = glyphs::icon_row(ui, folder_icon, &label)
+                    .on_hover_text(p.display().to_string());
+                resp.context_menu(|ui| {
+                    if ui.button("Open").clicked() {
+                        act.navigate = Some(p.clone());
+                        ui.close();
+                    }
+                    if ui.button("Open in New Tab").clicked() {
+                        act.new_tab_at = Some(p.clone());
+                        ui.close();
+                    }
+                    ui.separator();
+                    if ui.button("Remove from Sidebar").clicked() {
+                        unpin = Some(p.clone());
+                        ui.close();
+                    }
+                });
                 drop_target(app, ui, &resp, &p, act);
                 if resp.clicked() {
                     act.navigate = Some(p);
                 }
+            }
+            if let Some(p) = unpin {
+                app.unpin_from_sidebar(&p);
             }
         }
         ui.add_space(6.0);

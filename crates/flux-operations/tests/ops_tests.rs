@@ -424,3 +424,35 @@ fn duplicate_dir_copies_tree() {
         b"i"
     );
 }
+
+// ---------- compress ----------
+
+#[test]
+fn compress_creates_valid_zip() {
+    let (_t, dir) = tmp();
+    write_file(&dir, "a.txt", b"hello");
+    let sub = dir.join("docs");
+    std::fs::create_dir(&sub).unwrap();
+    write_file(&sub, "inner.txt", b"inner-data");
+    let dest = dir.join("out.zip");
+    let engine = OpEngine::new();
+    let id = engine.submit(
+        OpKind::Compress {
+            items: vec![dir.join("a.txt"), sub.clone()],
+            dest: dest.clone(),
+        },
+        ConflictPolicy::Ask,
+    );
+    let p = wait_op(&engine, id, Duration::from_secs(15));
+    assert!(matches!(p.state, OpState::Done), "state: {:?}", p.state);
+    assert!(dest.exists());
+    let mut za = zip::ZipArchive::new(std::fs::File::open(&dest).unwrap()).unwrap();
+    let names: Vec<String> = (0..za.len()).filter_map(|i| za.by_index(i).ok().and_then(|e| e.name().ok().map(|n| n.into_owned()))).collect();
+    assert!(names.iter().any(|n| n == "a.txt"), "{names:?}");
+    assert!(names.iter().any(|n| n == "docs/inner.txt"), "{names:?}");
+    assert!(names.iter().any(|n| n == "docs/"), "{names:?}");
+    use std::io::Read as _;
+    let mut s = String::new();
+    za.by_name("docs/inner.txt").unwrap().read_to_string(&mut s).unwrap();
+    assert_eq!(s, "inner-data");
+}

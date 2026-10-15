@@ -28,6 +28,8 @@ pub enum OpKind {
     Delete { items: Vec<PathBuf> },
     /// Copy each item next to itself as "name copy.ext" / "name copy N".
     Duplicate { items: Vec<PathBuf> },
+    /// Compress items into a .zip at `dest`.
+    Compress { items: Vec<PathBuf>, dest: PathBuf },
     Rename { from: PathBuf, to: PathBuf },
     BatchRename { actions: Vec<RenameAction> },
     Mkdir { path: PathBuf },
@@ -202,6 +204,13 @@ fn describe(kind: &OpKind) -> String {
         OpKind::Trash { items } => format!("Trash {} item(s)", items.len()),
         OpKind::Delete { items } => format!("Delete {} item(s)", items.len()),
         OpKind::Duplicate { items } => format!("Duplicate {} item(s)", items.len()),
+        OpKind::Compress { items, dest } => format!(
+            "Compress {} item(s) → {}",
+            items.len(),
+            dest.file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default()
+        ),
         OpKind::Rename { from, .. } => {
             format!("Rename {}", from.display())
         }
@@ -290,7 +299,10 @@ fn ops_worker(
             p.started = Some(Instant::now());
             p.tracks_bytes = matches!(
                 job.kind,
-                OpKind::Copy { .. } | OpKind::Move { .. } | OpKind::Duplicate { .. }
+                OpKind::Copy { .. }
+                    | OpKind::Move { .. }
+                    | OpKind::Duplicate { .. }
+                    | OpKind::Compress { .. }
             );
         }
         run_job(&job, &op, &ev_tx, &mut dirty);
@@ -397,6 +409,39 @@ fn run_job(
                     Err(e) => crate::copy::note_error(&ctx, format!("{}: {e}", src.display())),
                 }
                 dirty(ev_tx);
+            }
+        }
+        OpKind::Compress { items, dest } => {
+            let resolver = make_resolver(op, ev_tx);
+            let ctx = CopyCtx {
+                progress: &op.progress,
+                cancel: &op.cancel,
+                resolve: &resolver,
+                tag: job.id,
+                created_dirs: Mutex::new(Vec::new()),
+            };
+            discover(&ctx, items);
+            if cancelled(&ctx) {
+                return;
+            }
+            let mut dest = dest.clone();
+            if dest.exists() {
+                match resolver(&items[0], &dest) {
+                    ConflictAction::Overwrite => {
+                        let _ = std::fs::remove_file(&dest);
+                    }
+                    ConflictAction::KeepBoth => {
+                        dest = crate::copy::duplicate_dst(&dest);
+                    }
+                    ConflictAction::Skip | ConflictAction::CancelOp => return,
+                }
+            }
+            set_state(op, OpState::Running);
+            if let Err(e) = crate::archive::compress_items(items, &dest, &ctx) {
+                set_state(op, OpState::Failed(format!("compress: {e}")));
+            }
+            if cancelled(&ctx) {
+                let _ = std::fs::remove_file(&dest);
             }
         }
         OpKind::Trash { items } => {

@@ -431,6 +431,8 @@ fn bulk_rename_dialog(app: &mut FluxApp, br: &mut BulkRenameState, ctx: &egui::C
 pub fn row_context_menu(app: &mut FluxApp, ui: &mut egui::Ui, items: &[PathBuf]) {
     let single = items.len() == 1;
     let first = items.first().cloned();
+    let single_dir = single && first.as_ref().is_some_and(|p| p.is_dir());
+    let clipboard_ready = !app.clipboard.items.is_empty();
     if ui.button("Open").clicked() {
         ui.close();
         if let Some(p) = first.clone() {
@@ -441,21 +443,40 @@ pub fn row_context_menu(app: &mut FluxApp, ui: &mut egui::Ui, items: &[PathBuf])
             }
         }
     }
-    if let Some(p) = first.clone()
-        && p.is_dir() && ui.button("Open in New Tab").clicked() {
+    if single_dir {
+        let p = first.clone().unwrap();
+        if ui.button("Open in New Tab").clicked() {
             ui.close();
-            app.new_tab_at(p);
+            app.new_tab_at(p.clone());
         }
+        if ui.button("Open Terminal Here").clicked() {
+            ui.close();
+            let _ = flux_platform::open_in_terminal(&p);
+        }
+    }
+    if single && ui.button("Reveal in File Manager").clicked() {
+        ui.close();
+        if let Some(p) = first.clone() {
+            let _ = flux_platform::reveal_path(&p);
+        }
+    }
     ui.separator();
+    if ui.button("Cut").clicked() {
+        ui.close();
+        app.clipboard.items = items.to_vec();
+        app.clipboard.cut = true;
+    }
     if ui.button("Copy").clicked() {
         ui.close();
         app.clipboard.items = items.to_vec();
         app.clipboard.cut = false;
     }
-    if ui.button("Cut").clicked() {
+    if single_dir
+        && clipboard_ready
+        && ui.button("Paste Into Folder").clicked()
+    {
         ui.close();
-        app.clipboard.items = items.to_vec();
-        app.clipboard.cut = true;
+        app.submit_copy(first.clone().unwrap());
     }
     if ui.button("Duplicate").clicked() {
         ui.close();
@@ -466,10 +487,14 @@ pub fn row_context_menu(app: &mut FluxApp, ui: &mut egui::Ui, items: &[PathBuf])
             flux_operations::ConflictPolicy::SkipAll,
         );
     }
+    if ui.button("Compress to .zip").clicked() {
+        ui.close();
+        app.compress_items(items.to_vec());
+    }
     ui.separator();
     if ui.button("Rename…").clicked() {
         ui.close();
-        if items.len() == 1 {
+        if single {
             if let Some(p) = first.clone() {
                 app.dialog = Dialog::Rename {
                     input: p
@@ -483,9 +508,23 @@ pub fn row_context_menu(app: &mut FluxApp, ui: &mut egui::Ui, items: &[PathBuf])
             app.dialog = Dialog::BulkRename(BulkRenameState::new(items.to_vec()));
         }
     }
+    if single_dir
+        && !app.settings.bookmarks.contains(first.as_ref().unwrap())
+        && ui.button("Add to Sidebar").clicked()
+    {
+        ui.close();
+        app.pin_to_sidebar(first.clone().unwrap());
+    }
+    ui.separator();
     if ui.button("Move to Trash").clicked() {
         ui.close();
         app.submit_trash(items.to_vec());
+    }
+    if ui.button("Delete Permanently…").clicked() {
+        ui.close();
+        app.dialog = Dialog::ConfirmPermanentDelete {
+            items: items.to_vec(),
+        };
     }
     ui.separator();
     if ui.button("Copy Path").clicked() {
@@ -498,10 +537,106 @@ pub fn row_context_menu(app: &mut FluxApp, ui: &mut egui::Ui, items: &[PathBuf])
                 .join("\n"),
         );
     }
+    if single && ui.button("Copy Name").clicked() {
+        ui.close();
+        if let Some(p) = first.clone() {
+            app.pending_copy_text =
+                Some(p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
+        }
+    }
     if single
         && let Some(p) = first.clone()
             && ui.button("Properties").clicked() {
                 ui.close();
                 app.dialog = Dialog::Properties { path: p };
             }
+}
+
+/// Context menu for empty space in the file list — actions on the *current*
+/// directory itself (Explorer's background menu equivalent).
+pub fn bg_context_menu(app: &mut FluxApp, ui: &mut egui::Ui) {
+    if ui.button("New Folder…").clicked() {
+        ui.close();
+        app.dialog = Dialog::NewFolder { input: String::new() };
+    }
+    if ui.button("New File…").clicked() {
+        ui.close();
+        app.dialog = Dialog::NewFile { input: String::new() };
+    }
+    let has_clip = !app.clipboard.items.is_empty();
+    if ui
+        .add_enabled(has_clip, egui::Button::new("Paste"))
+        .clicked()
+    {
+        ui.close();
+        let dest = app.current_path();
+        app.submit_copy(dest);
+    }
+    ui.separator();
+    // Sort submenu — same affordance as column headers.
+    let cur = app.current_tab().snap.read().unwrap().sort;
+    ui.menu_button("Sort By", |ui| {
+        for (label, key) in [
+            ("Name", flux_core::SortKey::Name),
+            ("Size", flux_core::SortKey::Size),
+            ("Modified", flux_core::SortKey::Modified),
+            ("Type", flux_core::SortKey::Kind),
+        ] {
+            let mark = if cur.key == key { "● " } else { "   " };
+            if ui.button(format!("{mark}{label}")).clicked() {
+                ui.close();
+                app.set_sort(flux_core::SortSpec::for_header_click(&cur, key));
+            }
+        }
+        ui.separator();
+        let asc = cur.dir == flux_core::SortDir::Asc;
+        if ui
+            .button(if asc { "● Ascending" } else { "   Ascending" })
+            .clicked()
+        {
+            ui.close();
+            let mut s = cur;
+            s.dir = flux_core::SortDir::Asc;
+            app.set_sort(s);
+        }
+        if ui
+            .button(if !asc { "● Descending" } else { "   Descending" })
+            .clicked()
+        {
+            ui.close();
+            let mut s = cur;
+            s.dir = flux_core::SortDir::Desc;
+            app.set_sort(s);
+        }
+    });
+    ui.menu_button("Row Density", |ui| {
+        for (label, d) in [
+            ("Compact", crate::theme::Density::Compact),
+            ("Standard", crate::theme::Density::Standard),
+            ("Comfortable", crate::theme::Density::Comfortable),
+        ] {
+            let mark = if app.density == d { "● " } else { "   " };
+            if ui.button(format!("{mark}{label}")).clicked() {
+                ui.close();
+                app.density = d;
+            }
+        }
+    });
+    ui.separator();
+    if ui.button("Refresh").clicked() {
+        ui.close();
+        app.refresh();
+    }
+    if ui.button("Open Terminal Here").clicked() {
+        ui.close();
+        let p = app.current_path();
+        let _ = flux_platform::open_in_terminal(&p);
+    }
+    ui.separator();
+    if ui.button("Properties").clicked() {
+        ui.close();
+        app.dialog = Dialog::Properties {
+            path: app.current_path(),
+        };
+    }
 }

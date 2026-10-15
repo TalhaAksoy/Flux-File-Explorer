@@ -477,11 +477,13 @@ impl eframe::App for FluxApp {
             .show(ui, |ui| {
                 chrome::status_bar(self, ui, &mut act);
             });
-        egui::CentralPanel::default().show(ui, |ui| {
+        let central = egui::CentralPanel::default().show(ui, |ui| {
             if self.search_ui.active {
                 self.search_view(ui);
+                None
             } else {
                 let row_act = view::file_table(self, ui);
+                let had_row_ctx = row_act.context.is_some();
                 view::apply_click(self, &row_act);
                 if let Some(idx) = row_act.open {
                     self.open_entry(idx);
@@ -517,8 +519,23 @@ impl eframe::App for FluxApp {
                     }
                     self.context_menu_pos = Some(pos);
                 }
+                Some(had_row_ctx)
             }
         });
+
+        // Right-click on empty table space → background menu for the
+        // current directory (Explorer's background menu equivalent).
+        let central_rect = central.response.rect;
+        let had_row_ctx = central.inner.unwrap_or(false);
+        if !had_row_ctx
+            && !self.search_ui.active
+            && ctx.input(|i| i.pointer.secondary_clicked())
+            && ctx
+                .pointer_interact_pos()
+                .is_some_and(|p| central_rect.contains(p))
+        {
+            self.bg_menu_pos = ctx.pointer_interact_pos();
+        }
 
         // Row context menu overlay; persists until a click outside it.
         if let Some(pos) = self.context_menu_pos {
@@ -548,6 +565,35 @@ impl eframe::App for FluxApp {
             });
             if clicked_elsewhere || item_chosen {
                 self.context_menu_pos = None;
+            }
+        }
+
+        // Background (empty-area) context menu — same persistence pattern.
+        if let Some(pos) = self.bg_menu_pos {
+            let inner = egui::Area::new(egui::Id::new("bg_ctx"))
+                .order(egui::Order::Foreground)
+                .fixed_pos(pos)
+                .show(&ctx, |ui| {
+                    egui::Frame::popup(ui.style()).show(ui, |ui| {
+                        ui.set_min_width(170.0);
+                        dialogs::bg_context_menu(self, ui);
+                    });
+                });
+            let menu_rect = inner.response.rect;
+            let clicked_elsewhere = ctx.input(|i| {
+                i.pointer.any_pressed()
+                    && i.pointer
+                        .interact_pos()
+                        .is_some_and(|p| !menu_rect.contains(p))
+            });
+            let item_chosen = ctx.input(|i| {
+                i.pointer.primary_released()
+                    && i.pointer
+                        .interact_pos()
+                        .is_some_and(|p| menu_rect.contains(p))
+            });
+            if clicked_elsewhere || item_chosen {
+                self.bg_menu_pos = None;
             }
         }
 
@@ -678,6 +724,9 @@ impl eframe::App for FluxApp {
         }
         if act.new_tab {
             self.new_tab();
+        }
+        if let Some(p) = act.new_tab_at {
+            self.new_tab_at(p);
         }
         if let Some(i) = act.close_tab {
             self.close_tab(i);

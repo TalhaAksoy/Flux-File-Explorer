@@ -191,6 +191,8 @@ pub struct FluxApp {
     pub palette_sel: usize,
     /// Pointer position where a row context menu should appear.
     pub context_menu_pos: Option<egui::Pos2>,
+    /// Same for the background (empty-area) context menu.
+    pub bg_menu_pos: Option<egui::Pos2>,
     pub density: Density,
     pub dark: bool,
 
@@ -286,6 +288,7 @@ impl FluxApp {
             palette_query: String::new(),
             palette_sel: 0,
             context_menu_pos: None,
+            bg_menu_pos: None,
             density,
             dark,
             volumes: mounted_volumes(),
@@ -670,6 +673,50 @@ impl FluxApp {
         }
         self.ops
             .submit(OpKind::Trash { items }, flux_operations::ConflictPolicy::Ask);
+    }
+
+    /// Compress selected items to "<name>.zip" in their parent dir
+    /// (multi-select → "Archive.zip"); auto-suffixes when taken.
+    pub fn compress_items(&mut self, items: Vec<PathBuf>) {
+        let Some(first) = items.first() else { return };
+        let parent = first
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_default();
+        let stem = if items.len() == 1 {
+            first
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "Archive".into())
+        } else {
+            "Archive".to_string()
+        };
+        // Reserve a free name up-front; the op's resolver still guards races.
+        let mut dest = parent.join(format!("{stem}.zip"));
+        for n in 2..1000 {
+            if !dest.exists() {
+                break;
+            }
+            dest = parent.join(format!("{stem} {n}.zip"));
+        }
+        self.ops.submit(
+            OpKind::Compress { items, dest },
+            flux_operations::ConflictPolicy::Ask,
+        );
+    }
+
+    /// Pin a directory to the sidebar bookmarks (idempotent).
+    pub fn pin_to_sidebar(&mut self, path: PathBuf) {
+        if !self.settings.bookmarks.contains(&path) {
+            self.settings.bookmarks.push(path);
+            let _ = flux_settings::save(&self.settings);
+            self.toast("Added to sidebar".to_string());
+        }
+    }
+
+    pub fn unpin_from_sidebar(&mut self, path: &std::path::Path) {
+        self.settings.bookmarks.retain(|b| b != path);
+        let _ = flux_settings::save(&self.settings);
     }
 
     /// Per-frame pump: engine events, watcher, ops, search. Returns whether

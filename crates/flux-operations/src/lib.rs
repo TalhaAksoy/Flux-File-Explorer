@@ -5,6 +5,7 @@
 //! shared registry the UI polls; conflicts pause the worker on a per-op
 //! reply channel until the user (or an apply-to-all policy) answers.
 
+pub mod archive;
 pub mod conflict;
 pub mod copy;
 pub mod engine;

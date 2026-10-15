@@ -78,6 +78,14 @@ Copy throughput (APFS, clonefile-capable `fs::copy` path): 1.4 GiB/s on
   of the window into Finder/other apps on macOS/Windows; drag files in
   from the OS to copy them into the current folder
 - Duplicate (⌘D / context menu) → "name copy.ext" via the ops engine
+- **Context menus** (Explorer/Finder-style): row menu with Open / Open in
+  New Tab / Reveal in File Manager / Cut / Copy / Paste Into / Duplicate /
+  Compress to .zip / Rename / Add to Sidebar / Move to Trash / Delete
+  Permanently / Copy Path / Copy Name / Properties; empty-area menu with
+  New Folder / New File / Paste / Sort By / Row Density / Refresh /
+  Open Terminal Here / Properties; sidebar menu with Open / Open in New
+  Tab / Remove from Sidebar
+- Compress to .zip on the ops engine (deflate, chunked + cancellable)
 
 ## Known limitations (honest list)
 
@@ -95,6 +103,8 @@ Copy throughput (APFS, clonefile-capable `fs::copy` path): 1.4 GiB/s on
 - Drag-out preview shows the item's own contents when it's an image file;
   other types may get a blank drag image on macOS.
 - Column widths don't persist yet.
+- No "Open With…" app picker or OS Share menu yet — both need platform
+  app enumeration; Open uses the default handler.
 - No accessibility-tree audit beyond what egui/accesskit provides.
 
 ## Notes
