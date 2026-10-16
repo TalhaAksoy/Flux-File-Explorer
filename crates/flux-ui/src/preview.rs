@@ -509,20 +509,20 @@ fn exif_fields(path: &Path) -> Vec<(&'static str, String)> {
     // both forms rather than dropping a present value.
     let rat_f64 = |f: &exif::Field| -> Option<f64> {
         match &f.value {
-            Value::Rational(vv) => vv.first().map(&rat),
+            Value::Rational(vv) => vv.first().map(rat),
             Value::SRational(vv) => vv.first().map(|v| v.num as f64 / (v.denom.max(1) as f64)),
             Value::Short(vv) if vv.len() >= 2 => Some(vv[0] as f64 / (vv[1].max(1) as f64)),
             _ => None,
         }
     };
     // f/N aperture — Rational rendered as a real number.
-    if let Some(v) = x.get_field(Tag::FNumber, In::PRIMARY).and_then(&rat_f64) {
+    if let Some(v) = x.get_field(Tag::FNumber, In::PRIMARY).and_then(rat_f64) {
         out.push(("Aperture", format!("f/{v:.1}")));
     }
     // Shutter: 1/N for sub-second, N.N s otherwise.
     if let Some(secs) = x
         .get_field(Tag::ExposureTime, In::PRIMARY)
-        .and_then(&rat_f64)
+        .and_then(rat_f64)
         && secs > 0.0
     {
         out.push((
@@ -535,10 +535,7 @@ fn exif_fields(path: &Path) -> Vec<(&'static str, String)> {
         ));
     }
     push(&x, &mut out, "ISO", Tag::PhotographicSensitivity, &val);
-    if let Some(mm) = x
-        .get_field(Tag::FocalLength, In::PRIMARY)
-        .and_then(&rat_f64)
-    {
+    if let Some(mm) = x.get_field(Tag::FocalLength, In::PRIMARY).and_then(rat_f64) {
         out.push(("Focal length", format!("{mm:.0} mm")));
     }
     push(&x, &mut out, "Software", Tag::Software, &val);
