@@ -4,7 +4,7 @@
 
 use egui::{Color32, CornerRadius, Stroke, Style, Visuals};
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Density {
     Compact,
     Standard,
@@ -38,6 +38,7 @@ pub struct Palette {
     pub accent_fill: Color32,
     pub danger: Color32,
     pub warn: Color32,
+    pub success: Color32,
     // Surfaces (darkest → lightest in dark mode; reversed in light)
     pub bg_window: Color32,
     pub bg_sidebar: Color32,
@@ -71,6 +72,7 @@ impl Palette {
             accent_fill: accent.gamma_multiply(0.24),
             danger: Color32::from_rgb(229, 72, 77),
             warn: Color32::from_rgb(226, 175, 75),
+            success: Color32::from_rgb(80, 190, 110),
             bg_window: Color32::from_rgb(23, 25, 28),
             bg_sidebar: Color32::from_rgb(28, 30, 34),
             bg_content: Color32::from_rgb(32, 34, 38),
@@ -97,6 +99,7 @@ impl Palette {
             accent_fill: accent.gamma_multiply(0.14),
             danger: Color32::from_rgb(198, 52, 48),
             warn: Color32::from_rgb(160, 110, 20),
+            success: Color32::from_rgb(40, 150, 80),
             bg_window: Color32::from_rgb(245, 246, 248),
             bg_sidebar: Color32::from_rgb(240, 241, 244),
             bg_content: Color32::from_rgb(250, 250, 251),

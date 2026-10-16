@@ -122,21 +122,39 @@ impl ThumbCache {
 
     fn touch(&self, key: &Path) {
         let t = self.clock.fetch_add(1, Ordering::Relaxed) + 1;
-        if let Some(slot) = self.map.write().unwrap().get_mut(key) {
+        let mut map = self.map.write().unwrap();
+        if let Some(slot) = map.get_mut(key) {
             slot.1 = t;
         }
-        self.lru.lock().unwrap().push_back(key.to_path_buf());
+        let mut lru = self.lru.lock().unwrap();
+        lru.push_back(key.to_path_buf());
+        // Re-touches push duplicate keys; cap the deque so a long
+        // session can't grow it without bound. Stale keys are skipped
+        // during eviction anyway.
+        if lru.len() > MAX_CACHED * 4 {
+            let mut seen = rustc_hash::FxHashSet::default();
+            lru.retain(|k| map.contains_key(k) && seen.insert(k.clone()));
+        }
     }
 
     /// Look up a thumbnail; queues a decode on miss and returns None.
     /// Failed decodes return None without re-queueing. Returns the handle
     /// (cheap Arc clone) so callers can aspect-fit by its size.
     pub fn texture(&self, path: &Path) -> Option<egui::TextureHandle> {
-        if let Some((slot, _)) = self.map.read().unwrap().get(path) {
-            let h = match slot {
+        // The read guard must drop before `touch` takes the write lock —
+        // binding it in a `let` (not an `if let` scrutinee, whose
+        // temporaries live for the whole block) ends it at the `;`.
+        // Upgrading a held read lock deadlocks the UI thread permanently.
+        let cached = self
+            .map
+            .read()
+            .unwrap()
+            .get(path)
+            .map(|(slot, _)| match slot {
                 Slot::Ready(t) => Some(t.clone()),
                 Slot::Failed => None,
-            };
+            });
+        if let Some(h) = cached {
             self.touch(path);
             return h;
         }
@@ -219,5 +237,30 @@ mod tests {
         let th = decode(&p).expect("should decode");
         assert!(th.width() <= THUMB_PX && th.height() <= THUMB_PX);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Regression: `texture()` on a cached path used to call `touch()`
+    /// (a `map.write()`) while the `map.read()` guard from the `if let`
+    /// scrutinee was still alive — a guaranteed self-deadlock that froze
+    /// the UI thread the first time any thumbnail was re-rendered
+    /// (observed: navigating to Downloads parked the main thread in
+    /// `futex_wait` forever). `ThumbCache` is `!Sync` so this can't be
+    /// witnessed with a timeout thread — under the old code this test
+    /// simply hangs, which a CI timeout still reports.
+    #[test]
+    fn texture_on_cached_path_does_not_deadlock() {
+        let c = ThumbCache::new();
+        {
+            let mut map = c.map.write().unwrap();
+            map.insert(
+                PathBuf::from("/x/seeded.png"),
+                (Slot::Failed, c.clock.fetch_add(1, Ordering::Relaxed)),
+            );
+        }
+        // Every cached hit used to park the caller in write_contended
+        // forever — 100 hits must complete immediately.
+        for _ in 0..100 {
+            assert!(c.texture(Path::new("/x/seeded.png")).is_none());
+        }
     }
 }

@@ -21,11 +21,22 @@ tracing.workspace = true
 portable-pty.workspace = true
 alacritty_terminal.workspace = true
 image.workspace = true
+sha2 = "0.11.1"
+kamadak-exif = "0.6"
+mime_guess = "2"
+fs2.workspace = true
+
+# Owner/group name resolution — std exposes uid/gid on unix only.
+[target.'cfg(unix)'.dependencies]
+uzers = "0.12.2"
 
 # Drag files OUT of the window to the OS. macOS/Windows only — the Linux
 # GTK backend can't interoperate with winit (documented limitation).
 [target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
 drag = "2.1.1"
+
+[dev-dependencies]
+tempfile.workspace = true
 
 [lints]
 workspace = true

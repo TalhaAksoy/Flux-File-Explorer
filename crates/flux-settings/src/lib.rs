@@ -111,6 +111,10 @@ impl Default for Settings {
 }
 
 fn settings_path() -> PathBuf {
+    // Overridable for tests and isolated screenshot runs.
+    if let Some(p) = std::env::var_os("FLUX_SETTINGS_PATH") {
+        return PathBuf::from(p);
+    }
     let base = directories::ProjectDirs::from("dev", "flux", "flux-files")
         .map(|d| d.config_dir().to_path_buf())
         .unwrap_or_else(|| PathBuf::from("."));

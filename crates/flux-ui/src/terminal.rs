@@ -476,7 +476,9 @@ impl FluxApp {
         if self.terminal.is_none() {
             return;
         }
-        let current_dir = self.current_path(); // before the &mut field borrow
+        // The terminal tracks the directory the user would land back on —
+        // the active dir tab's path, or the most recent dir on workspaces.
+        let current_dir = self.last_dir_path(); // before the &mut field borrow
         let term = self.terminal.as_mut().unwrap();
         term.drain_events();
 
@@ -538,11 +540,13 @@ impl FluxApp {
             return;
         }
         let term = self.terminal.as_mut().unwrap();
-        if external {
-            let _ = flux_platform::open_in_terminal(&current_dir);
-        }
-        if cd {
-            term.cd_to(&current_dir);
+        if let Some(dir) = &current_dir {
+            if external {
+                let _ = flux_platform::open_in_terminal(dir);
+            }
+            if cd {
+                term.cd_to(dir);
+            }
         }
 
         // Grid viewport.
