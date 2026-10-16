@@ -13,8 +13,10 @@ pub mod glyphs;
 pub mod icon_cache;
 pub mod menu;
 pub mod pane;
+pub mod preview;
 pub mod terminal;
 pub mod theme;
+pub mod thumbs;
 pub mod view;
 
 use std::path::PathBuf;
@@ -40,11 +42,15 @@ impl FluxApp {
             (
                 i.consume_key(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, Key::P),
                 i.consume_key(egui::Modifiers::NONE, Key::Escape),
+                i.consume_key(egui::Modifiers::ALT, Key::P),
             )
         });
         if i.0 {
             self.palette_open = !self.palette_open;
             self.palette_query.clear();
+        }
+        if i.2 {
+            self.toggle_preview();
         }
         if i.1 {
             // Escape: close the topmost overlay first, then transient UI
@@ -109,11 +115,18 @@ impl FluxApp {
                 i.consume_key(shift, K::ArrowDown),
                 i.consume_key(egui::Modifiers::NONE, K::ArrowUp),
                 i.consume_key(shift, K::ArrowUp),
+                i.consume_key(egui::Modifiers::NONE, K::ArrowLeft),
+                i.consume_key(egui::Modifiers::NONE, K::ArrowRight),
+                i.consume_key(shift, K::ArrowLeft),
+                i.consume_key(shift, K::ArrowRight),
                 i.consume_key(egui::Modifiers::NONE, K::PageDown),
                 i.consume_key(egui::Modifiers::NONE, K::PageUp),
                 i.consume_key(egui::Modifiers::NONE, K::Home),
                 i.consume_key(egui::Modifiers::NONE, K::End),
                 i.consume_key(cmd, K::D),
+                i.consume_key(cmd | shift, K::Z),
+                i.consume_key(cmd, K::Z),
+                i.consume_key(cmd, K::Y),
             )
         });
         let (
@@ -143,11 +156,18 @@ impl FluxApp {
             down_s,
             up_k,
             up_s,
+            left_k,
+            right_k,
+            left_s,
+            right_s,
             pgdn,
             pgup,
             home,
             end,
             duplicate,
+            redo_k,
+            undo_k,
+            redo_y,
         ) = hits;
 
         // Ctrl+Tab / Ctrl+Shift+Tab — cycle tabs (browser standard).
@@ -227,6 +247,12 @@ impl FluxApp {
         if duplicate {
             self.duplicate_selected();
         }
+        if undo_k {
+            self.undo();
+        }
+        if redo_k || redo_y {
+            self.redo();
+        }
         if copy_paths {
             let text = self
                 .actionable_paths()
@@ -289,11 +315,22 @@ impl FluxApp {
             s.view_len()
         };
         let step = if pgdn || pgup { 30 } else { 1 };
+        // Grid/Gallery navigate by cells: vertical moves jump a whole
+        // cell-row, horizontal moves walk one entry at a time.
+        let in_grid = matches!(
+            self.settings.view_mode,
+            flux_settings::ViewMode::Grid | flux_settings::ViewMode::Gallery
+        );
+        let vstep = if in_grid { self.grid_cols.max(1) } else { 1 };
         let tab = self.current_tab_mut();
         let cur = tab.sel.focus.unwrap_or(0);
         let new_focus = if down || down_s {
-            Some((cur + 1).min(page.saturating_sub(1)))
+            Some((cur + vstep).min(page.saturating_sub(1)))
         } else if up_k || up_s {
+            Some(cur.saturating_sub(vstep))
+        } else if in_grid && (right_k || right_s) {
+            Some((cur + 1).min(page.saturating_sub(1)))
+        } else if in_grid && (left_k || left_s) {
             Some(cur.saturating_sub(1))
         } else if pgdn {
             Some((cur + step).min(page.saturating_sub(1)))
@@ -312,7 +349,7 @@ impl FluxApp {
             }
             let tab = self.current_tab_mut();
             let s = tab.snap.read().unwrap();
-            if down_s || up_s {
+            if down_s || up_s || left_s || right_s {
                 tab.sel.extend_to(&s, row);
             } else {
                 tab.sel.select_row(&s, row);
@@ -588,6 +625,22 @@ impl eframe::App for FluxApp {
                 .show(ui, |ui| {
                     let pal = theme::Palette::of(&ui.style().visuals);
                     self.terminal_panel(ui, &pal);
+                });
+        }
+        // Right-side preview pane (Alt+P) — after the side/bottom panels
+        // so it shares the central column's full height.
+        if self.settings.show_preview {
+            let prev_frame = egui::Frame::default()
+                .fill(theme::chrome_fill(dark))
+                .inner_margin(egui::Margin::symmetric(12, 10));
+            egui::Panel::right("preview")
+                .resizable(true)
+                .size_range(180.0..=520.0)
+                .default_size(280.0)
+                .show_separator_line(false)
+                .frame(prev_frame)
+                .show(ui, |ui| {
+                    preview::panel(self, ui);
                 });
         }
         let mut row_action = view::RowAction::default();
@@ -1003,6 +1056,7 @@ pub fn run(start_dir: Option<PathBuf>) -> eframe::Result<()> {
         Box::new(|cc| {
             let mut app = FluxApp::new();
             app.icons.set_ctx(cc.egui_ctx.clone());
+            app.thumbs.set_ctx(cc.egui_ctx.clone());
             if let Some(d) = start_dir.filter(|d| d.is_dir()) {
                 app.navigate(d);
             }

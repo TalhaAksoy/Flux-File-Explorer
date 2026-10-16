@@ -2,12 +2,14 @@
 //! All heavy work happens on engine threads; `update` only drains message
 //! queues and draws the current snapshot.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use flux_core::enumerate::{EnumEvent, MetaEvent};
 use flux_core::snapshot::SnapshotHandle;
-use flux_core::{ComputeEngine, ComputeEvent, EnumEngine, MetaEngine, SortKey, SortSpec};
+use flux_core::{
+    ComputeEngine, ComputeEvent, EnumEngine, MetaEngine, SizeEngine, SortKey, SortSpec,
+};
 use flux_operations::engine::OpEvent;
 use flux_operations::{ConflictQuery, OpEngine, OpKind, OpState};
 use flux_platform::{FsWatcher, Volume, mounted_volumes};
@@ -243,6 +245,8 @@ pub const COMMANDS: &[Command] = &[
 pub struct FluxApp {
     pub enum_engine: EnumEngine,
     pub meta_engine: MetaEngine,
+    /// Opt-in recursive folder sizes (context menu request).
+    pub size_engine: SizeEngine,
     pub compute: ComputeEngine,
     pub ops: OpEngine,
     pub search_engine: SearchEngine,
@@ -283,6 +287,8 @@ pub struct FluxApp {
 
     /// Native icon cache (background worker; glyph fallback until ready).
     pub icons: crate::icon_cache::IconCacheHandle,
+    /// Per-file image thumbnails (bounded LRU worker cache).
+    pub thumbs: crate::thumbs::ThumbCacheHandle,
 
     /// In-progress internal drag: absolute paths being dragged, and the
     /// pointer position where the drag began.
@@ -305,10 +311,110 @@ pub struct FluxApp {
     pub sidebar_drag: Option<SidebarDrag>,
     /// Docked embedded terminal panel (None = closed).
     pub terminal: Option<crate::terminal::EmbeddedTerm>,
+
+    /// Preview worker + state for the right-side panel. `preview_req` is
+    /// the path currently in focus; `preview`/`preview_tex` hold the last
+    /// completed result (only applied while it still matches the request).
+    pub preview_engine: crate::preview::PreviewEngine,
+    pub preview_req: Option<PathBuf>,
+    pub preview: Option<crate::preview::PreviewMsg>,
+    pub preview_tex: Option<egui::TextureHandle>,
     /// Debounce marker for settings writes: set when a frame mutates
     /// persisted state (e.g. column resize); flushed after a quiet period
     /// so resizing doesn't write settings.json every frame.
     pub settings_dirty_at: Option<Instant>,
+    /// "Open With" app list for the file a context menu was opened on —
+    /// resolved once per target (spawning xdg-mime per frame would be
+    /// wasteful) and recomputed when the target path changes.
+    pub open_with_cache: Option<(PathBuf, Vec<flux_platform::OpenWithApp>)>,
+    /// Cells-per-row the icon grid last rendered with — keyboard nav in
+    /// grid/gallery mode moves Up/Down by this many entries.
+    pub grid_cols: usize,
+    /// Undo/redo journal. Ops that complete `Done` cleanly are inverted
+    /// into entries here; ops this app submits itself as inverses are
+    /// pre-marked in `journaled_ops` so they don't double-record.
+    pub undo_stack: Vec<UndoEntry>,
+    pub redo_stack: Vec<UndoEntry>,
+    /// Op ids already journaled (or submitted BY undo/redo).
+    pub journaled_ops: rustc_hash::FxHashSet<u64>,
+    /// Ops-history popup visibility (status-bar button).
+    pub show_ops_log: bool,
+}
+
+/// A journal entry: submit `inverse` to undo, `forward` to redo.
+pub struct UndoEntry {
+    pub label: String,
+    pub forward: OpKind,
+    pub inverse: OpKind,
+}
+
+/// Build an inverse for a cleanly-completed op, or None when the op kind
+/// can't be safely reversed.
+///
+/// Inverted here: renames (exact), mkdir/create-file (trash the result —
+/// recoverable, unlike delete), duplicate (trash the copies), compress
+/// (trash the archive). NOT inverted: copy/move (post-conflict dest set
+/// isn't recoverable from the kind alone), trash (the OS trash API has
+/// no portable restore), delete, extract (an "Extract Here" inverse
+/// would have to trash the *parent* dir — dangerous).
+fn undo_entry(kind: &OpKind, label: &str) -> Option<UndoEntry> {
+    let inverse = match kind {
+        OpKind::Rename { from, to } if to.exists() => OpKind::Rename {
+            from: to.clone(),
+            to: from.clone(),
+        },
+        OpKind::BatchRename { actions } => {
+            let inv: Vec<flux_operations::RenameAction> = actions
+                .iter()
+                .filter(|a| a.dst.exists())
+                .map(|a| flux_operations::RenameAction {
+                    src: a.dst.clone(),
+                    dst: a.src.clone(),
+                    status: flux_operations::RenameStatus::Ready,
+                })
+                .collect();
+            if inv.is_empty() {
+                return None;
+            }
+            OpKind::BatchRename { actions: inv }
+        }
+        OpKind::Mkdir { path } if path.exists() => OpKind::Trash {
+            items: vec![path.clone()],
+        },
+        OpKind::CreateFile { path } if path.exists() => OpKind::Trash {
+            items: vec![path.clone()],
+        },
+        OpKind::Duplicate { items } => {
+            let dsts: Vec<PathBuf> = items
+                .iter()
+                .map(|p| flux_operations::copy::duplicate_dst(p.as_path()))
+                .filter(|p| p.exists())
+                .collect();
+            if dsts.is_empty() {
+                return None;
+            }
+            OpKind::Trash { items: dsts }
+        }
+        OpKind::Compress { dest, .. } if dest.exists() => OpKind::Trash {
+            items: vec![dest.clone()],
+        },
+        _ => return None,
+    };
+    Some(UndoEntry {
+        label: label.to_string(),
+        forward: kind.clone(),
+        inverse,
+    })
+}
+
+impl FluxApp {
+    /// Cached `open_with_apps` for `path` (see field docs).
+    pub fn open_with_apps(&mut self, path: &Path) -> Vec<flux_platform::OpenWithApp> {
+        if self.open_with_cache.as_ref().map(|(p, _)| p.as_path()) != Some(path) {
+            self.open_with_cache = Some((path.to_path_buf(), flux_platform::open_with_apps(path)));
+        }
+        self.open_with_cache.as_ref().unwrap().1.clone()
+    }
 }
 
 /// Which sidebar section a reorder drag belongs to — a path that exists in
@@ -381,6 +487,7 @@ impl FluxApp {
         Self {
             enum_engine: EnumEngine::new(),
             meta_engine: MetaEngine::new(),
+            size_engine: SizeEngine::new(),
             compute: ComputeEngine::new(),
             ops: OpEngine::new(),
             search_engine: SearchEngine::new(),
@@ -409,6 +516,7 @@ impl FluxApp {
             pending_copy_text: None,
             ext_clipboard: None,
             icons: std::rc::Rc::new(crate::icon_cache::IconCache::new()),
+            thumbs: std::rc::Rc::new(crate::thumbs::ThumbCache::new()),
             dragging: None,
             last_watch_hit: None,
             last_gc: Instant::now(),
@@ -417,8 +525,47 @@ impl FluxApp {
             wake_installed: false,
             sidebar_drag: None,
             terminal: None,
+            preview_engine: crate::preview::PreviewEngine::new(),
+            preview_req: None,
+            preview: None,
+            preview_tex: None,
             settings_dirty_at: None,
+            open_with_cache: None,
+            grid_cols: 1,
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
+            journaled_ops: rustc_hash::FxHashSet::default(),
+            show_ops_log: false,
         }
+    }
+
+    /// Ctrl+Z — submit the inverse of the newest undoable op.
+    pub fn undo(&mut self) {
+        let Some(entry) = self.undo_stack.pop() else {
+            self.toast("Nothing to undo".to_string());
+            return;
+        };
+        let id = self
+            .ops
+            .submit(entry.inverse.clone(), flux_operations::ConflictPolicy::Ask);
+        // Inverse ops don't re-journal (redo rides the explicit stack).
+        self.journaled_ops.insert(id);
+        self.toast(format!("Undoing {}", entry.label));
+        self.redo_stack.push(entry);
+    }
+
+    /// Ctrl+Shift+Z / Ctrl+Y — re-run the last undone op.
+    pub fn redo(&mut self) {
+        let Some(entry) = self.redo_stack.pop() else {
+            self.toast("Nothing to redo".to_string());
+            return;
+        };
+        let id = self
+            .ops
+            .submit(entry.forward.clone(), flux_operations::ConflictPolicy::Ask);
+        self.journaled_ops.insert(id);
+        self.toast(format!("Redoing {}", entry.label));
+        self.undo_stack.push(entry);
     }
 
     pub fn current_tab(&self) -> &Tab {
@@ -456,6 +603,7 @@ impl FluxApp {
         };
         let g = self.enum_engine.navigate(&snap, path.clone());
         self.current_tab_mut().gen_id = g;
+        self.size_engine.cancel_current();
         self.watcher.watch(&path);
         self.free_space = flux_platform::free_space(&path);
         flux_settings::push_recent(&mut self.settings, path.clone());
@@ -679,6 +827,20 @@ impl FluxApp {
         self.save_settings();
     }
 
+    /// Toggle the right-side preview panel (Alt+P / status-bar button).
+    pub fn toggle_preview(&mut self) {
+        self.settings.show_preview = !self.settings.show_preview;
+        self.save_settings();
+    }
+
+    /// Switch the file-pane presentation (persisted).
+    pub fn set_view_mode(&mut self, mode: flux_settings::ViewMode) {
+        if self.settings.view_mode != mode {
+            self.settings.view_mode = mode;
+            self.save_settings();
+        }
+    }
+
     /// Explorer's "hide protected operating system files" gate — a
     /// separate, stronger filter than `show_hidden` (Windows attributes;
     /// harmless no-op elsewhere). Used by the Settings dialog live preview.
@@ -716,6 +878,37 @@ impl FluxApp {
             Density::Comfortable => flux_settings::Density::Comfortable,
         };
         let _ = flux_settings::save(&self.settings);
+    }
+
+    /// Queue recursive size walks for the real directories among
+    /// `items` (entries of the current snapshot only — the result lands
+    /// in their size cell like deferred metadata).
+    pub fn calculate_dir_sizes(&mut self, items: &[PathBuf]) {
+        let gen_id = self.current_tab().gen_id;
+        let snap = self.current_snap();
+        let mut asked = 0u32;
+        {
+            let s = snap.read().unwrap();
+            for it in items {
+                let Some(idx) = s.entries().iter().position(|e| {
+                    e.kind == flux_core::EntryKind::Dir
+                        && e.size == flux_core::UNKNOWN_SIZE
+                        && s.path.join(&e.name) == *it
+                }) else {
+                    continue;
+                };
+                self.size_engine
+                    .request(&snap, gen_id, idx as u32, it.clone());
+                asked += 1;
+            }
+        }
+        if asked > 0 {
+            self.toast(if asked == 1 {
+                "Calculating folder size…".to_string()
+            } else {
+                format!("Calculating {asked} folder sizes…")
+            });
+        }
     }
 
     /// Selected-or-focused items as (path, is_dir).
@@ -894,6 +1087,16 @@ impl FluxApp {
         );
     }
 
+    /// Extract `archive` into `dest_dir`. A fresh `dest_dir` is staged
+    /// (cancel leaves nothing); an existing one merges with per-entry
+    /// conflict resolution.
+    pub fn extract_archive(&mut self, archive: PathBuf, dest_dir: PathBuf) {
+        self.ops.submit(
+            OpKind::ExtractArchive { archive, dest_dir },
+            flux_operations::ConflictPolicy::Ask,
+        );
+    }
+
     /// Pin a directory to the sidebar bookmarks (idempotent).
     pub fn pin_to_sidebar(&mut self, path: PathBuf) {
         if path.is_dir() && !self.settings.bookmarks.contains(&path) {
@@ -1033,6 +1236,35 @@ impl FluxApp {
                 MetaEvent::Superseded { .. } => {}
             }
         }
+        // Preview worker results — apply only while the path is still
+        // the one in focus; uploads the texture for image previews.
+        for msg in self.preview_engine.drain_events().collect::<Vec<_>>() {
+            if self.preview_req.as_ref() == Some(&msg.path) {
+                if let crate::preview::Preview::Image(img) = &msg.preview {
+                    self.preview_tex = Some(ctx.load_texture(
+                        "preview",
+                        img.clone(),
+                        egui::TextureOptions::LINEAR,
+                    ));
+                }
+                self.preview = Some(msg);
+            }
+            ctx.request_repaint();
+        }
+        // Opt-in folder sizes: apply_size already wrote under the snap
+        // lock; events just drive repaint + resort when sorting by size.
+        for ev in self.size_engine.drain_events().collect::<Vec<_>>() {
+            if let flux_core::SizeEvent::Done { gen_id, .. } = ev {
+                for tab in &mut self.tabs {
+                    if tab.gen_id == gen_id
+                        && matches!(tab.snap.read().map(|s| s.sort.key), Ok(SortKey::Size))
+                    {
+                        self.compute.rebuild(&tab.snap, gen_id);
+                    }
+                }
+                ctx.request_repaint();
+            }
+        }
         // Compute events: apply deferred reselection + repaint.
         let compute_events: Vec<_> = self.compute.drain_events().collect();
         for ev in compute_events {
@@ -1093,10 +1325,34 @@ impl FluxApp {
                     self.toast(format!("{}: {err}", op.label));
                 }
             }
+            // Journal cleanly-finished ops for undo. Only pure `Done`
+            // counts — a partial or errored result can't be safely
+            // inverted wholesale.
+            for op in self.ops.all_ops() {
+                if self.journaled_ops.contains(&op.id) {
+                    continue;
+                }
+                let p = op.progress_snapshot();
+                if !matches!(p.state, OpState::Done) {
+                    continue;
+                }
+                self.journaled_ops.insert(op.id);
+                if let Some(entry) = undo_entry(&op.kind, &op.label) {
+                    if self.undo_stack.len() >= 50 {
+                        self.undo_stack.remove(0);
+                    }
+                    self.undo_stack.push(entry);
+                    self.redo_stack.clear();
+                }
+            }
             ctx.request_repaint();
         }
         // Icon fetches finished → upload + repaint.
         if self.icons.pump(ctx) > 0 {
+            ctx.request_repaint();
+        }
+        // Thumbnail decodes finished → upload + repaint.
+        if self.thumbs.pump(ctx) > 0 {
             ctx.request_repaint();
         }
         // Search events.

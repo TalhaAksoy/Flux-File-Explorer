@@ -1,0 +1,287 @@
+//! Preview panel — right-side column for the focused item. All IO and
+//! decoding happens on a dedicated worker; the panel only renders the
+//! last completed result, so a fast selection change can never flash a
+//! stale preview.
+
+use std::io::Read;
+use std::path::{Path, PathBuf};
+use std::sync::mpsc;
+
+use crate::app::FluxApp;
+use crate::theme::Palette;
+
+/// Bound a decoded image to fit comfortably inside the panel; thumbnails
+/// and previews share this ceiling so huge raws can't OOM the decode.
+const MAX_DIM: u32 = 1600;
+/// Bytes sampled for the text sniff — UTF-8 check runs on this chunk.
+const TEXT_SNIFF: usize = 64 * 1024;
+/// Text preview line cap: enough for real files, bounded for paint cost.
+const TEXT_MAX_LINES: usize = 500;
+/// Child count shown for folders (stop counting beyond this).
+const DIR_COUNT_CAP: usize = 10_000;
+
+/// What the worker produced for one path.
+pub enum Preview {
+    /// Decoded image (already size-bounded to [`MAX_DIM`]).
+    Image(egui::ColorImage),
+    /// First chunk of UTF-8-ish text.
+    Text(String),
+    /// Short status line for special entries (dir count, link target).
+    Info(String),
+    /// Nothing meaningful to render (binary, unreadable, gone).
+    Empty,
+}
+
+pub struct PreviewMsg {
+    pub path: PathBuf,
+    pub preview: Preview,
+}
+
+/// Latest-request-wins worker. Results carry the requested path — the
+/// app drops anything that doesn't match the item currently in focus.
+pub struct PreviewEngine {
+    req_tx: mpsc::Sender<PathBuf>,
+    event_rx: mpsc::Receiver<PreviewMsg>,
+    _worker: std::thread::JoinHandle<()>,
+}
+
+impl Default for PreviewEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl PreviewEngine {
+    pub fn new() -> Self {
+        let (req_tx, req_rx) = mpsc::channel::<PathBuf>();
+        let (ev_tx, event_rx) = mpsc::sync_channel::<PreviewMsg>(8);
+        let worker = std::thread::Builder::new()
+            .name("flux-preview".into())
+            .spawn(move || {
+                while let Ok(mut path) = req_rx.recv() {
+                    // Coalesce bursts: only the newest request matters.
+                    while let Ok(newer) = req_rx.try_recv() {
+                        path = newer;
+                    }
+                    let msg = PreviewMsg {
+                        preview: load(&path),
+                        path,
+                    };
+                    let _ = ev_tx.try_send(msg);
+                }
+            })
+            .expect("spawn preview worker");
+        Self {
+            req_tx,
+            event_rx,
+            _worker: worker,
+        }
+    }
+
+    pub fn request(&self, path: PathBuf) {
+        let _ = self.req_tx.send(path);
+    }
+
+    pub fn drain_events(&self) -> impl Iterator<Item = PreviewMsg> + '_ {
+        self.event_rx.try_iter()
+    }
+}
+
+/// Decode bounded the same way `thumbs::decode` does — dimension and
+/// allocation caps so a decompression-bomb image can't OOM the worker.
+fn decode_image(path: &Path) -> Option<image::RgbaImage> {
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(16_384);
+    limits.max_image_height = Some(16_384);
+    limits.max_alloc = Some(512 * 1024 * 1024);
+    let mut reader = image::ImageReader::open(path)
+        .ok()?
+        .with_guessed_format()
+        .ok()?;
+    reader.limits(limits);
+    let img = reader.decode().ok()?;
+    Some(img.thumbnail(MAX_DIM, MAX_DIM).to_rgba8())
+}
+
+fn is_image_path(path: &Path) -> bool {
+    path.extension()
+        .map(|e| {
+            matches!(
+                e.to_string_lossy().to_lowercase().as_str(),
+                "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "ico"
+            )
+        })
+        .unwrap_or(false)
+}
+
+fn load(path: &Path) -> Preview {
+    let Ok(md) = std::fs::symlink_metadata(path) else {
+        return Preview::Empty;
+    };
+    if md.file_type().is_symlink() {
+        let target = std::fs::read_link(path)
+            .map(|t| t.display().to_string())
+            .unwrap_or_else(|_| "?".into());
+        return Preview::Info(format!("Symbolic link → {target}"));
+    }
+    if md.is_dir() {
+        let mut n = 0usize;
+        if let Ok(rd) = std::fs::read_dir(path) {
+            for e in rd {
+                if e.is_err() || n >= DIR_COUNT_CAP {
+                    break;
+                }
+                n += 1;
+            }
+        }
+        return Preview::Info(if n >= DIR_COUNT_CAP {
+            format!("Folder — {DIR_COUNT_CAP}+ items")
+        } else {
+            format!("Folder — {n} item{}", if n == 1 { "" } else { "s" })
+        });
+    }
+    if is_image_path(path)
+        && let Some(img) = decode_image(path)
+    {
+        let size = [img.width() as usize, img.height() as usize];
+        return Preview::Image(egui::ColorImage::from_rgba_unmultiplied(size, img.as_raw()));
+    }
+    // Text sniff: NUL in the first chunk ⇒ binary.
+    let Ok(mut f) = std::fs::File::open(path) else {
+        return Preview::Empty;
+    };
+    let mut buf = vec![0u8; TEXT_SNIFF];
+    let Ok(n) = f.read(&mut buf) else {
+        return Preview::Empty;
+    };
+    buf.truncate(n);
+    if buf[..n.min(8192)].contains(&0) {
+        return Preview::Empty;
+    }
+    let text = String::from_utf8_lossy(&buf);
+    let capped: String = text
+        .lines()
+        .take(TEXT_MAX_LINES)
+        .collect::<Vec<_>>()
+        .join("\n");
+    Preview::Text(
+        if n >= TEXT_SNIFF || text.lines().count() > TEXT_MAX_LINES {
+            format!("{capped}\n\n· · ·\n(truncated — {TEXT_SNIFF} KiB max)")
+        } else {
+            capped
+        },
+    )
+}
+
+/// The right-side docked panel. Called every frame while enabled; the
+/// worker request for the focused path is issued here (idempotent).
+pub fn panel(app: &mut FluxApp, ui: &mut egui::Ui) {
+    let pal = Palette::of(&ui.style().visuals);
+    let target = app.focused_path();
+    let Some(path) = target else {
+        ui.add_space(30.0);
+        ui.vertical_centered(|ui| {
+            ui.label(egui::RichText::new("Nothing selected").color(pal.text_muted));
+        });
+        return;
+    };
+
+    // Issue/refresh the worker request when focus changed. The result is
+    // applied in `pump` only while this path is still the requested one.
+    if app.preview_req.as_ref() != Some(&path) {
+        app.preview_req = Some(path.clone());
+        app.preview = None;
+        app.preview_tex = None;
+        app.preview_engine.request(path.clone());
+    }
+
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.display().to_string());
+    ui.add_space(4.0);
+    ui.label(
+        egui::RichText::new(&name)
+            .color(pal.text_primary)
+            .size(14.0)
+            .strong(),
+    );
+
+    // Metadata rows — read live (cheap single stat).
+    if let Ok(md) = std::fs::symlink_metadata(&path) {
+        let kind = if md.file_type().is_symlink() {
+            "Link".to_string()
+        } else if md.is_dir() {
+            "Folder".to_string()
+        } else {
+            flux_platform::type_label(path.extension().and_then(|e| e.to_str())).to_string()
+        };
+        let mut rows = vec![("Type", kind)];
+        if md.is_file() {
+            rows.push(("Size", crate::format::format_size(md.len())));
+        }
+        if let Ok(m) = md.modified() {
+            rows.push(("Modified", crate::format::format_mtime(Some(m))));
+        }
+        ui.add_space(6.0);
+        for (k, v) in rows {
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new(k).color(pal.text_muted).size(11.5));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(egui::RichText::new(v).color(pal.text_secondary).size(11.5));
+                });
+            });
+        }
+    }
+    ui.add_space(6.0);
+    ui.separator();
+    ui.add_space(6.0);
+
+    match app.preview.as_ref().map(|m| &m.preview) {
+        None => {
+            ui.vertical_centered(|ui| {
+                ui.add(egui::Spinner::new().size(16.0));
+            });
+        }
+        Some(Preview::Empty) => {
+            ui.label(
+                egui::RichText::new("No preview available")
+                    .color(pal.text_muted)
+                    .size(12.0),
+            );
+        }
+        Some(Preview::Info(msg)) => {
+            ui.label(
+                egui::RichText::new(msg)
+                    .color(pal.text_secondary)
+                    .size(12.0),
+            );
+        }
+        Some(Preview::Text(text)) => {
+            egui::ScrollArea::vertical()
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(text)
+                                .monospace()
+                                .size(11.0)
+                                .color(pal.text_secondary),
+                        )
+                        .selectable(true)
+                        .wrap(),
+                    );
+                });
+        }
+        Some(Preview::Image(_)) => {
+            if let Some(tex) = &app.preview_tex {
+                let size = tex.size_vec2();
+                let w = ui.available_width().max(1.0);
+                let scaled = size * (w / size.x).min(1.0);
+                ui.vertical_centered(|ui| {
+                    ui.add(egui::Image::from_texture(tex).max_size(scaled));
+                });
+            }
+        }
+    }
+}

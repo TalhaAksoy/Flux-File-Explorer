@@ -770,6 +770,26 @@ pub fn status_bar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) 
                     }
                 }
             }
+            if glyphs::icon_toggle(
+                ui,
+                glyphs::Glyph::Preview,
+                "Toggle preview panel (Alt+P)",
+                app.settings.show_preview,
+            )
+            .clicked()
+            {
+                app.toggle_preview();
+            }
+            if glyphs::icon_toggle(
+                ui,
+                glyphs::Glyph::History,
+                "Operation history / undo (Ctrl+Z)",
+                app.show_ops_log,
+            )
+            .clicked()
+            {
+                app.show_ops_log = !app.show_ops_log;
+            }
             for op in app.ops.active_ops() {
                 let p = op.progress_snapshot();
                 let frac = p.fraction();

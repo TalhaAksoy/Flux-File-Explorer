@@ -21,6 +21,10 @@ pub enum Glyph {
     External,
     /// Cogwheel — settings.
     Gear,
+    /// Side panel with a content column — preview pane.
+    Preview,
+    /// Clock face — operation history.
+    History,
 }
 
 /// Draw `g` centered inside `rect` with the given color.
@@ -100,6 +104,19 @@ pub fn paint_glyph(p: &egui::Painter, rect: Rect, g: Glyph, color: Color32) {
                 );
             }
         }
+        Glyph::Preview => {
+            // Framed pane split vertically — list side + preview side.
+            let body = Rect::from_center_size(c, Vec2::new(r * 1.5, r * 1.15));
+            p.rect_stroke(body, CornerRadius::same(2), st, StrokeKind::Inside);
+            let x = body.left() + body.width() * 0.6;
+            p.line_segment(
+                [
+                    Pos2::new(x, body.top() + r * 0.14),
+                    Pos2::new(x, body.bottom() - r * 0.14),
+                ],
+                st,
+            );
+        }
         Glyph::Disk => {
             // Drive: wide rounded body + slot line + activity dot.
             let body = Rect::from_center_size(c, Vec2::new(r * 1.5, r * 0.9));
@@ -150,6 +167,12 @@ pub fn paint_glyph(p: &egui::Painter, rect: Rect, g: Glyph, color: Color32) {
                 let d = egui::vec2(a.cos(), a.sin());
                 p.line_segment([c + d * (r * 0.5), c + d * (r * 0.78)], st);
             }
+        }
+        Glyph::History => {
+            // Clock: circular face + hands to ~12 and ~4 o'clock.
+            p.circle_stroke(c, r * 0.78, st);
+            p.line_segment([c, c + egui::vec2(0.0, -r * 0.5)], st);
+            p.line_segment([c, c + egui::vec2(r * 0.38, r * 0.22)], st);
         }
     }
 }

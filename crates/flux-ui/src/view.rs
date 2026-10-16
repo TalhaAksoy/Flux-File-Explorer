@@ -100,6 +100,15 @@ pub fn paint_entry_icon(p: &egui::Painter, rect: egui::Rect, kind: EntryKind, pa
     }
 }
 
+/// Largest centered rect inside `outer` that keeps `img`'s aspect ratio.
+fn fit_rect(outer: egui::Rect, img: egui::Vec2) -> egui::Rect {
+    if img.x <= 0.0 || img.y <= 0.0 {
+        return outer;
+    }
+    let scale = (outer.width() / img.x).min(outer.height() / img.y);
+    egui::Rect::from_center_size(outer.center(), img * scale)
+}
+
 fn row_icon_rect(row_rect: egui::Rect, row_h: f32) -> egui::Rect {
     let size = row_h * 0.62;
     egui::Rect::from_center_size(
@@ -160,12 +169,22 @@ pub fn file_table(app: &mut FluxApp, ui: &mut egui::Ui) -> RowAction {
         return action;
     }
 
+    if !matches!(app.settings.view_mode, flux_settings::ViewMode::List) {
+        return match app.settings.view_mode {
+            flux_settings::ViewMode::Compact => compact_list(app, ui, &pal),
+            flux_settings::ViewMode::Grid => icon_grid(app, ui, &pal, 96.0),
+            flux_settings::ViewMode::Gallery => icon_grid(app, ui, &pal, 200.0),
+            flux_settings::ViewMode::List => unreachable!(),
+        };
+    }
+
     let focus_row = app.current_tab().sel.focus;
     let scroll_to = app.current_tab_mut().scroll_to_row.take();
     // Borrow the selection once; row closure does O(1) lookups, no clones.
     let sel = &app.tabs[app.active].sel;
     let egui_ctx = ui.ctx().clone();
     let icons = app.icons.clone();
+    let thumbs = app.thumbs.clone();
     let drag_active = app.dragging.is_some();
 
     let mut builder = TableBuilder::new(ui)
@@ -269,11 +288,27 @@ pub fn file_table(app: &mut FluxApp, ui: &mut egui::Ui) -> RowAction {
             row.col(|ui| {
                 let rect = ui.available_rect_before_wrap();
                 let icon_rect = row_icon_rect(rect, row_h);
-                match icons.texture(&icon_key, &abs_path) {
+                // Image files get a decoded thumbnail; everything else the
+                // kind-keyed OS icon, falling back to painted glyphs.
+                let thumb = if kind == EntryKind::File && crate::thumbs::is_thumb_ext(&abs_path) {
+                    thumbs.texture(&abs_path)
+                } else {
+                    None
+                };
+                let tex = thumb
+                    .as_ref()
+                    .map(|t| t.id())
+                    .or_else(|| icons.texture(&icon_key, &abs_path));
+                match tex {
                     Some(tex) => {
+                        // Thumbs keep aspect; kind icons are already square.
+                        let r = match &thumb {
+                            Some(h) => fit_rect(icon_rect, h.size_vec2()),
+                            None => icon_rect,
+                        };
                         ui.painter().image(
                             tex,
-                            icon_rect,
+                            r,
                             egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
                             Color32::WHITE.gamma_multiply(ghost),
                         );
@@ -374,4 +409,287 @@ pub fn apply_click(app: &mut FluxApp, action: &RowAction) {
             tab.sel.select_row(&s, row);
         }
     }
+}
+
+/// Compact mode: names-only dense rows, no column header — one row per
+/// entry, same virtualization as the details table.
+fn compact_list(app: &mut FluxApp, ui: &mut egui::Ui, pal: &Palette) -> RowAction {
+    let mut action = RowAction::default();
+    let row_h = app.density.row_height() * 0.82;
+    let snap = app.current_snap();
+    let view_len = snap.read().map(|s| s.view_len()).unwrap_or(0);
+    let scroll_to = app.current_tab_mut().scroll_to_row.take();
+    let sel = &app.tabs[app.active].sel;
+    let egui_ctx = ui.ctx().clone();
+    let icons = app.icons.clone();
+    let drag_active = app.dragging.is_some();
+
+    let mut vis_min = EntryIdx::MAX;
+    let mut vis_max = 0;
+    let mut builder = TableBuilder::new(ui)
+        .striped(true)
+        .cell_layout(Layout::left_to_right(Align::Center))
+        .column(Column::remainder().clip(true))
+        .min_scrolled_height(0.0)
+        .sense(Sense::click_and_drag());
+    if let Some(r) = scroll_to {
+        builder = builder.scroll_to_row(r, Some(Align::Center));
+    }
+    builder.body(|body| {
+        body.rows(row_h, view_len, |mut row| {
+            let row_idx = row.index();
+            let (idx, name, kind, icon_key, abs_path, hidden) = {
+                let s = match snap.read() {
+                    Ok(s) => s,
+                    Err(_) => return,
+                };
+                let Some((idx, e)) = s.row(row_idx) else {
+                    return;
+                };
+                (
+                    idx,
+                    e.display_name().into_owned(),
+                    e.kind,
+                    crate::icon_cache::IconKey::for_entry(e, &s.path.join(&e.name)),
+                    s.path.join(&e.name),
+                    e.hidden,
+                )
+            };
+            vis_min = vis_min.min(idx);
+            vis_max = vis_max.max(idx);
+            row.set_selected(sel.contains(idx));
+            let ghost = if hidden { 0.55 } else { 1.0 };
+            row.col(|ui| {
+                let rect = ui.available_rect_before_wrap();
+                let icon_rect = row_icon_rect(rect, row_h);
+                match icons.texture(&icon_key, &abs_path) {
+                    Some(tex) => {
+                        ui.painter().image(
+                            tex,
+                            icon_rect,
+                            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                            Color32::WHITE.gamma_multiply(ghost),
+                        );
+                    }
+                    None => paint_entry_icon(ui.painter(), icon_rect, kind, pal),
+                }
+                ui.painter().text(
+                    egui::pos2(rect.left() + row_h * 1.05, rect.center().y),
+                    egui::Align2::LEFT_CENTER,
+                    &name,
+                    egui::FontId::default(),
+                    pal.text_primary.gamma_multiply(ghost),
+                );
+            });
+            let resp = row.response();
+            if resp.drag_started() {
+                action.drag_start = Some(row_idx);
+            }
+            if drag_active && kind == EntryKind::Dir && resp.contains_pointer() {
+                action.drop_row = Some(row_idx);
+                crate::glyphs::glow_drop_target(
+                    &egui_ctx.debug_painter(),
+                    resp.rect,
+                    egui_ctx
+                        .style_of(egui_ctx.theme())
+                        .visuals
+                        .selection
+                        .stroke
+                        .color,
+                );
+            }
+            if resp.clicked() {
+                let mods = egui_ctx.input(|i| i.modifiers);
+                action.click = Some(row_idx);
+                action.click_shift = mods.shift;
+                action.click_cmd = mods.command;
+            }
+            if resp.double_clicked() {
+                action.open = Some(idx);
+            }
+            if resp.middle_clicked() && kind == EntryKind::Dir {
+                action.open_new_tab = Some(idx);
+            }
+            if resp.secondary_clicked() {
+                action.context = Some((row_idx, resp.interact_pointer_pos().unwrap_or_default()));
+            }
+        });
+    });
+    if vis_min <= vis_max {
+        action.visible_range = Some((vis_min, vis_max));
+    }
+    action
+}
+
+/// Grid/Gallery: fixed-size cells (icon on top, name below) laid out
+/// left-to-right, top-to-bottom. Virtualized by `ScrollArea::show_rows`
+/// over cell-rows — a 100k-entry dir still lays out only the viewport.
+fn icon_grid(app: &mut FluxApp, ui: &mut egui::Ui, pal: &Palette, cell_w: f32) -> RowAction {
+    let mut action = RowAction::default();
+    let gallery = cell_w > 120.0;
+    let cell_h = cell_w + 20.0; // icon area + one name line
+    let snap = app.current_snap();
+    let view_len = snap.read().map(|s| s.view_len()).unwrap_or(0);
+    let avail_w = ui.available_width().max(cell_w);
+    let cols = ((avail_w / cell_w).floor() as usize).max(1);
+    app.grid_cols = cols;
+    let n_rows = view_len.div_ceil(cols);
+
+    let scroll_to = app.current_tab_mut().scroll_to_row.take().map(|r| r / cols);
+    let sel = &app.tabs[app.active].sel;
+    let egui_ctx = ui.ctx().clone();
+    let icons = app.icons.clone();
+    let thumbs = app.thumbs.clone();
+    let drag_active = app.dragging.is_some();
+    let visuals = egui_ctx.style_of(egui_ctx.theme()).visuals.clone();
+
+    let mut vis_min = EntryIdx::MAX;
+    let mut vis_max = 0;
+
+    egui::ScrollArea::vertical()
+        .auto_shrink([false, false])
+        .show_rows(ui, cell_h, n_rows, |ui, row_range| {
+            if let Some(target) = scroll_to
+                && row_range.contains(&target)
+            {
+                ui.scroll_to_rect(
+                    egui::Rect::from_min_size(
+                        ui.cursor().min
+                            + egui::vec2(0.0, (target - row_range.start) as f32 * cell_h),
+                        egui::vec2(1.0, cell_h),
+                    ),
+                    Some(Align::Center),
+                );
+            }
+            for r in row_range {
+                ui.horizontal(|ui| {
+                    for c in 0..cols {
+                        let row_idx = r * cols + c;
+                        if row_idx >= view_len {
+                            break;
+                        }
+                        let (idx, name, kind, icon_key, abs_path, hidden) = {
+                            let s = match snap.read() {
+                                Ok(s) => s,
+                                Err(_) => return,
+                            };
+                            let Some((idx, e)) = s.row(row_idx) else {
+                                return;
+                            };
+                            (
+                                idx,
+                                e.display_name().into_owned(),
+                                e.kind,
+                                crate::icon_cache::IconKey::for_entry(e, &s.path.join(&e.name)),
+                                s.path.join(&e.name),
+                                e.hidden,
+                            )
+                        };
+                        vis_min = vis_min.min(idx);
+                        vis_max = vis_max.max(idx);
+
+                        let (rect, resp) = ui.allocate_exact_size(
+                            Vec2::new(cell_w, cell_h),
+                            Sense::click_and_drag(),
+                        );
+                        let selected = sel.contains(idx);
+                        if selected || resp.hovered() {
+                            let (fill, stroke) = if selected {
+                                (visuals.selection.bg_fill, visuals.selection.stroke)
+                            } else {
+                                (visuals.widgets.hovered.bg_fill, egui::Stroke::NONE)
+                            };
+                            ui.painter().rect(
+                                rect.shrink(1.0),
+                                6.0,
+                                fill,
+                                stroke,
+                                egui::StrokeKind::Inside,
+                            );
+                        }
+                        let ghost = if hidden { 0.55 } else { 1.0 };
+
+                        // Icon region: centered in the upper part of the cell.
+                        let icon_side = if gallery { cell_w * 0.78 } else { 44.0 };
+                        let icon_rect = egui::Rect::from_center_size(
+                            egui::pos2(rect.center().x, rect.top() + icon_side * 0.6),
+                            Vec2::splat(icon_side),
+                        );
+                        let thumb =
+                            if kind == EntryKind::File && crate::thumbs::is_thumb_ext(&abs_path) {
+                                thumbs.texture(&abs_path)
+                            } else {
+                                None
+                            };
+                        let tex = thumb
+                            .as_ref()
+                            .map(|t| t.id())
+                            .or_else(|| icons.texture(&icon_key, &abs_path));
+                        match tex {
+                            Some(tex) => {
+                                let r = match &thumb {
+                                    Some(h) => fit_rect(icon_rect, h.size_vec2()),
+                                    None => icon_rect,
+                                };
+                                ui.painter().image(
+                                    tex,
+                                    r,
+                                    egui::Rect::from_min_max(
+                                        egui::pos2(0.0, 0.0),
+                                        egui::pos2(1.0, 1.0),
+                                    ),
+                                    Color32::WHITE.gamma_multiply(ghost),
+                                );
+                            }
+                            None => paint_entry_icon(ui.painter(), icon_rect, kind, pal),
+                        }
+                        // Name line: centered, clipped to the cell.
+                        let name_rect = egui::Rect::from_min_max(
+                            egui::pos2(rect.left() + 4.0, rect.bottom() - 18.0),
+                            egui::pos2(rect.right() - 4.0, rect.bottom() - 2.0),
+                        );
+                        let p = ui.painter().with_clip_rect(name_rect);
+                        p.text(
+                            egui::pos2(name_rect.center().x, name_rect.center().y),
+                            egui::Align2::CENTER_CENTER,
+                            &name,
+                            egui::FontId::proportional(if gallery { 13.0 } else { 11.5 }),
+                            pal.text_primary.gamma_multiply(ghost),
+                        );
+
+                        if resp.drag_started() {
+                            action.drag_start = Some(row_idx);
+                        }
+                        if drag_active && kind == EntryKind::Dir && resp.contains_pointer() {
+                            action.drop_row = Some(row_idx);
+                            crate::glyphs::glow_drop_target(
+                                &egui_ctx.debug_painter(),
+                                resp.rect,
+                                visuals.selection.stroke.color,
+                            );
+                        }
+                        if resp.clicked() {
+                            let mods = egui_ctx.input(|i| i.modifiers);
+                            action.click = Some(row_idx);
+                            action.click_shift = mods.shift;
+                            action.click_cmd = mods.command;
+                        }
+                        if resp.double_clicked() {
+                            action.open = Some(idx);
+                        }
+                        if resp.middle_clicked() && kind == EntryKind::Dir {
+                            action.open_new_tab = Some(idx);
+                        }
+                        if resp.secondary_clicked() {
+                            action.context =
+                                Some((row_idx, resp.interact_pointer_pos().unwrap_or_default()));
+                        }
+                    }
+                });
+            }
+        });
+    if vis_min <= vis_max {
+        action.visible_range = Some((vis_min, vis_max));
+    }
+    action
 }
