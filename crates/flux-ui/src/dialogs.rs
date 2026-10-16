@@ -484,28 +484,24 @@ pub fn show(app: &mut FluxApp, ctx: &egui::Context) {
                                                         }
                                                         ui.separator();
                                                         group(ui, "SYSTEM FONTS");
-                                                        for (c, installed) in
+                                                        // Curated picks that are actually on the
+                                                        // machine — "not installed" entries don't
+                                                        // belong under SYSTEM FONTS at all.
+                                                        for (c, _) in
                                                             crate::theme::installed_fonts(list)
                                                                 .iter()
-                                                                .filter(|(c, _)| {
+                                                                .filter(|(c, installed)| {
                                                                     !crate::theme::is_bundled(c.key)
                                                                         && !c.patterns.is_empty()
+                                                                        && *installed
                                                                 })
                                                         {
-                                                            let text = if *installed {
-                                                                c.label.to_string()
-                                                            } else {
-                                                                format!(
-                                                                    "{} (not installed)",
-                                                                    c.label
-                                                                )
-                                                            };
                                                             pick(
                                                                 ui,
                                                                 c.key.to_string(),
-                                                                text,
+                                                                c.label.to_string(),
                                                                 None,
-                                                                *installed,
+                                                                true,
                                                             );
                                                         }
                                                         // Every other family found on the OS —
