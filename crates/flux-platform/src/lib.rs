@@ -11,7 +11,11 @@ pub mod watch;
 
 pub use dialogs::{PickResult, pick_folder};
 pub use icons::{FileIcon, file_icon, type_label};
-pub use open::{open_in_terminal, open_path, open_paths, reveal_path};
+#[cfg(windows)]
+pub use open::open_with_dialog;
+pub use open::{
+    OpenWithApp, open_in_terminal, open_path, open_paths, open_with, open_with_apps, reveal_path,
+};
 pub use sysdirs::{FreeSpace, free_space, home_dir, known_dirs};
 pub use trash::{TrashError, trash_items};
 pub use volumes::{Volume, mounted_volumes};

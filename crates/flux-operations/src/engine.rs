@@ -23,7 +23,7 @@ use crate::rename::{RenameAction, execute_renames};
 
 pub type OpId = u64;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum OpKind {
     Copy {
         sources: Vec<PathBuf>,
@@ -48,6 +48,12 @@ pub enum OpKind {
     Compress {
         items: Vec<PathBuf>,
         dest: PathBuf,
+    },
+    /// Extract a .zip into `dest_dir` (created when absent — staged;
+    /// merged with conflict resolution when present — "Extract Here").
+    ExtractArchive {
+        archive: PathBuf,
+        dest_dir: PathBuf,
     },
     Rename {
         from: PathBuf,
@@ -81,6 +87,9 @@ pub enum OpEvent {
 pub struct OpHandle {
     pub id: OpId,
     pub label: String,
+    /// The submitted job — kept so the UI can journal inverses (undo)
+    /// once the op finishes cleanly.
+    pub kind: OpKind,
     pub progress: Mutex<OpProgress>,
     cancel: AtomicBool,
     policy: Mutex<ConflictPolicy>,
@@ -148,6 +157,7 @@ impl OpEngine {
         let handle = Arc::new(OpHandle {
             id,
             label,
+            kind: kind.clone(),
             progress: Mutex::new(OpProgress::default()),
             cancel: AtomicBool::new(false),
             policy: Mutex::new(policy),
@@ -237,6 +247,9 @@ fn describe(kind: &OpKind) -> String {
         OpKind::Trash { items } => format!("Trash {} item(s)", items.len()),
         OpKind::Delete { items } => format!("Delete {} item(s)", items.len()),
         OpKind::Duplicate { items } => format!("Duplicate {} item(s)", items.len()),
+        OpKind::ExtractArchive { archive, dest_dir } => {
+            format!("Extract {} → {}", archive.display(), dest_dir.display())
+        }
         OpKind::Compress { items, dest } => format!(
             "Compress {} item(s) → {}",
             items.len(),
@@ -336,6 +349,7 @@ fn ops_worker(
                     | OpKind::Move { .. }
                     | OpKind::Duplicate { .. }
                     | OpKind::Compress { .. }
+                    | OpKind::ExtractArchive { .. }
             );
         }
         run_job(&job, &op, &ev_tx, &mut dirty);
@@ -479,6 +493,24 @@ fn run_job(
             // No dest cleanup on cancel: `dest` is never touched until
             // the staged archive is complete, so there's nothing partial
             // to sweep.
+        }
+        OpKind::ExtractArchive { archive, dest_dir } => {
+            let resolver = make_resolver(op, ev_tx);
+            let ctx = CopyCtx {
+                progress: &op.progress,
+                cancel: &op.cancel,
+                resolve: &resolver,
+                tag: job.id,
+                created_dirs: Mutex::new(Vec::new()),
+                failed: Mutex::new(FxHashSet::default()),
+            };
+            set_state(op, OpState::Running);
+            // extract_archive stages into `dest.fluxpart-*` when dest is
+            // new and sweeps it on cancel/failure; "Extract Here" merges
+            // in place and is guarded entry-by-entry.
+            if let Err(e) = crate::archive::extract_archive(archive, dest_dir, &ctx) {
+                set_state(op, OpState::Failed(format!("extract: {e}")));
+            }
         }
         OpKind::Trash { items } => {
             if let Ok(mut p) = op.progress.lock() {
