@@ -16,8 +16,12 @@ tracing.workspace = true
 
 # Native OS file icons. On Linux this would pull GTK stack — kept to
 # desktop targets where it uses NSWorkspace / SHGetFileInfo instead.
+# rfd: native folder-picker for "Add Bookmark…" (Linux falls back to
+# zenity/kdialog subprocesses — see dialogs.rs — so rfd stays off that
+# target and drags no GTK/portal deps in).
 [target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
 file_icon_provider = "1.0.2"
+rfd = "0.15"
 
 # NSPasteboard file-URL interop for the OS clipboard (macOS).
 [target.'cfg(target_os = "macos")'.dependencies]

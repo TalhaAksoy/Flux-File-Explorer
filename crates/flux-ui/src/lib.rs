@@ -805,12 +805,31 @@ impl eframe::App for FluxApp {
                 ctx.request_repaint();
             }
 
-            // Pointer released → drop on resolved target.
-            if ctx.input(|i| i.pointer.any_released()) {
-                let copy = ctx.input(|i| i.modifiers.alt);
-                match act.drop_target.take() {
-                    Some(target) => self.apply_drop(target, copy),
-                    None => self.dragging = None,
+            // Pointer released → drop on resolved target. The Bookmarks
+            // zone wins: it pins dragged folders rather than moving them.
+            if ctx.input(|i| i.pointer.primary_released()) {
+                if act.bookmark_zone {
+                    if let Some(drag) = self.dragging.take() {
+                        let mut pinned = 0usize;
+                        let mut skipped = 0usize;
+                        for p in drag.items {
+                            if p.is_dir() {
+                                self.pin_to_sidebar(p);
+                                pinned += 1;
+                            } else {
+                                skipped += 1;
+                            }
+                        }
+                        if skipped > 0 && pinned == 0 {
+                            self.toast("Only folders can be bookmarked".to_string());
+                        }
+                    }
+                } else {
+                    let copy = ctx.input(|i| i.modifiers.alt);
+                    match act.drop_target.take() {
+                        Some(target) => self.apply_drop(target, copy),
+                        None => self.dragging = None,
+                    }
                 }
             }
 

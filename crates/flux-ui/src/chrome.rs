@@ -36,6 +36,9 @@ pub struct ChromeAction {
     pub drop_target: Option<PathBuf>,
     /// Sidebar context menu → open this path in a new tab.
     pub new_tab_at: Option<PathBuf>,
+    /// Pointer is over the Bookmarks drop zone while dragging — a release
+    /// pins the dragged folders instead of moving them anywhere.
+    pub bookmark_zone: bool,
 }
 
 /// During a drag, mark `resp` as a drop target for `dir` when hovered and
@@ -47,7 +50,10 @@ fn drop_target(
     dir: &std::path::Path,
     act: &mut ChromeAction,
 ) {
-    if app.dragging.is_some() && resp.hovered() {
+    // `contains_pointer`, not `hovered`: egui reports `hovered` only on the
+    // dragged widget while a pointer button is down, so drop zones must use
+    // the pointer-position test to glow and register during the drag.
+    if app.dragging.is_some() && resp.contains_pointer() {
         act.drop_target = Some(dir.to_path_buf());
         glyphs::glow_drop_target(ui.painter(), resp.rect, ui.visuals().selection.stroke.color);
     }
@@ -66,6 +72,14 @@ pub fn toolbar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
             .insert(egui::TextStyle::Button, egui::FontId::proportional(14.5));
     }
     ui.horizontal(|ui| {
+        // Click empty toolbar space to edit the path directly. Registered
+        // FIRST so real widgets (nav buttons, crumbs, search) — registered
+        // later — win egui's last-registered-wins hit test over their rects.
+        let crumb_edit = ui.interact(
+            ui.max_rect(),
+            egui::Id::new("crumb_edit"),
+            egui::Sense::click(),
+        );
         let tab = app.current_tab();
         let can_back = tab.history.can_back();
         let can_fwd = tab.history.can_forward();
@@ -176,15 +190,9 @@ pub fn toolbar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
                         }
                     });
                 });
-            // Click the breadcrumb area to edit the path directly.
-            if ui
-                .interact(
-                    ui.max_rect(),
-                    egui::Id::new("crumb_edit"),
-                    egui::Sense::click(),
-                )
-                .clicked()
-            {
+            // The background interact was registered before the buttons —
+            // it only wins clicks that land on empty space.
+            if crumb_edit.clicked() {
                 app.address_edit = Some(path.display().to_string());
                 app.focus_address = true;
             }
@@ -267,43 +275,71 @@ pub fn sidebar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
                     act.navigate = Some(path);
                 }
             }
-            if !app.settings.recents.is_empty() {
-                section(ui, "Recent");
-                for p in app
-                    .settings
-                    .recents
-                    .iter()
-                    .take(6)
-                    .cloned()
-                    .collect::<Vec<_>>()
-                {
-                    let label = p
-                        .file_name()
-                        .map(|n| n.to_string_lossy().into_owned())
-                        .unwrap_or_else(|| p.display().to_string());
-                    let resp = glyphs::icon_row(ui, folder_icon, &label, p == current)
-                        .on_hover_text(p.display().to_string());
-                    resp.context_menu(|ui| {
-                        if ui.button("Open").clicked() {
-                            act.navigate = Some(p.clone());
-                            ui.close();
-                        }
-                        if ui.button("Open in New Tab").clicked() {
-                            act.new_tab_at = Some(p.clone());
-                            ui.close();
-                        }
-                    });
-                    drop_target(app, ui, &resp, &p, act);
-                    if resp.middle_clicked() {
-                        act.new_tab_at = Some(p.clone());
-                    }
-                    if resp.clicked() {
-                        act.navigate = Some(p);
-                    }
+            // Bookmarks — always rendered (even empty): the section is the
+            // drop zone for pinning dragged folders, and the header carries
+            // the "Add Folder…" context action.
+            let mut add_bookmark = false;
+            ui.add_space(8.0);
+            let hdr_lbl = ui.label(
+                egui::RichText::new("Bookmarks")
+                    .color(pal.text_muted)
+                    .size(11.0),
+            );
+            // The header strip spans the full panel width — a small text
+            // label would be a frustrating drop target otherwise.
+            let hdr = ui.interact(
+                egui::Rect::from_min_size(
+                    hdr_lbl.rect.min,
+                    egui::vec2(ui.available_width(), hdr_lbl.rect.height()),
+                ),
+                ui.id().with("bookmarks_header"),
+                egui::Sense::click(),
+            );
+            hdr.context_menu(|ui| {
+                if ui.button("Add Folder…").clicked() {
+                    add_bookmark = true;
+                    ui.close();
                 }
+            });
+            if app.dragging.is_some() && hdr.contains_pointer() {
+                act.bookmark_zone = true;
+                glyphs::glow_drop_target(
+                    ui.painter(),
+                    hdr.rect.expand2(egui::Vec2::new(0.0, 3.0)),
+                    ui.visuals().selection.stroke.color,
+                );
             }
-            if !app.settings.bookmarks.is_empty() {
-                section(ui, "Bookmarks");
+            if app.settings.bookmarks.is_empty() {
+                // Empty-state hint doubles as the drop zone + add menu.
+                let (rect, resp) = ui.allocate_exact_size(
+                    egui::Vec2::new(ui.available_width(), 28.0),
+                    egui::Sense::click(),
+                );
+                ui.painter().text(
+                    rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    "Drop folders here · click or right-click to add",
+                    egui::FontId::proportional(11.5),
+                    pal.text_muted,
+                );
+                resp.context_menu(|ui| {
+                    if ui.button("Add Folder…").clicked() {
+                        add_bookmark = true;
+                        ui.close();
+                    }
+                });
+                if resp.clicked() {
+                    add_bookmark = true;
+                }
+                if app.dragging.is_some() && resp.contains_pointer() {
+                    act.bookmark_zone = true;
+                    glyphs::glow_drop_target(
+                        ui.painter(),
+                        rect,
+                        ui.visuals().selection.stroke.color,
+                    );
+                }
+            } else {
                 let mut unpin: Option<PathBuf> = None;
                 for p in app.settings.bookmarks.clone() {
                     let label = p
@@ -337,6 +373,45 @@ pub fn sidebar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
                 }
                 if let Some(p) = unpin {
                     app.unpin_from_sidebar(&p);
+                }
+                // Trailing "add" row — permanent click target for the picker
+                // and a generous pin drop zone once the list has entries.
+                let plus = |p: &egui::Painter, r: egui::Rect, c: egui::Color32| {
+                    p.text(
+                        r.center(),
+                        egui::Align2::CENTER_CENTER,
+                        "+",
+                        egui::FontId::proportional(r.height() * 0.8),
+                        c,
+                    );
+                };
+                let resp = glyphs::icon_row(ui, plus, "Add Bookmark…", false)
+                    .on_hover_text("Choose a folder, or drop folders here");
+                resp.context_menu(|ui| {
+                    if ui.button("Add Folder…").clicked() {
+                        add_bookmark = true;
+                        ui.close();
+                    }
+                });
+                if resp.clicked() {
+                    add_bookmark = true;
+                }
+                if app.dragging.is_some() && resp.contains_pointer() {
+                    act.bookmark_zone = true;
+                    glyphs::glow_drop_target(
+                        ui.painter(),
+                        resp.rect,
+                        ui.visuals().selection.stroke.color,
+                    );
+                }
+            }
+            if add_bookmark {
+                match flux_platform::pick_folder() {
+                    flux_platform::PickResult::Picked(p) => app.pin_to_sidebar(p),
+                    flux_platform::PickResult::Unavailable => {
+                        app.toast("No folder picker available".to_string())
+                    }
+                    flux_platform::PickResult::Cancelled => {}
                 }
             }
             section(ui, "Volumes");

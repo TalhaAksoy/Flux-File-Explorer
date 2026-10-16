@@ -822,7 +822,7 @@ impl FluxApp {
 
     /// Pin a directory to the sidebar bookmarks (idempotent).
     pub fn pin_to_sidebar(&mut self, path: PathBuf) {
-        if !self.settings.bookmarks.contains(&path) {
+        if path.is_dir() && !self.settings.bookmarks.contains(&path) {
             self.settings.bookmarks.push(path);
             let _ = flux_settings::save(&self.settings);
             self.toast("Added to sidebar".to_string());
