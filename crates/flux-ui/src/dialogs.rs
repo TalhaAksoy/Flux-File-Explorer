@@ -436,7 +436,13 @@ pub fn show(app: &mut FluxApp, ctx: &egui::Context) {
                                                         let mut pick = |ui: &mut egui::Ui,
                                                                     k: String,
                                                                     text: String,
+                                                                    family: Option<egui::FontFamily>,
                                                                     enabled: bool| {
+                                                            let text = match family {
+                                                                Some(f) => egui::RichText::new(text)
+                                                                    .family(f),
+                                                                None => egui::RichText::new(text),
+                                                            };
                                                             let resp = ui.add_enabled(
                                                                 enabled,
                                                                 egui::Button::selectable(
@@ -454,6 +460,7 @@ pub fn show(app: &mut FluxApp, ctx: &egui::Context) {
                                                             ui,
                                                             String::new(),
                                                             list[0].label.to_string(),
+                                                            None,
                                                             true,
                                                         );
                                                         group(ui, "FLUX FONTS");
@@ -464,10 +471,14 @@ pub fn show(app: &mut FluxApp, ctx: &egui::Context) {
                                                                     crate::theme::is_bundled(c.key)
                                                                 })
                                                         {
+                                                            // Bundled fonts preview in their own
+                                                            // typeface — each is registered under
+                                                            // its own egui family at load time.
                                                             pick(
                                                                 ui,
                                                                 c.key.to_string(),
                                                                 c.label.to_string(),
+                                                                crate::theme::bundled_family(c.key),
                                                                 true,
                                                             );
                                                         }
@@ -493,6 +504,7 @@ pub fn show(app: &mut FluxApp, ctx: &egui::Context) {
                                                                 ui,
                                                                 c.key.to_string(),
                                                                 text,
+                                                                None,
                                                                 *installed,
                                                             );
                                                         }
@@ -516,6 +528,7 @@ pub fn show(app: &mut FluxApp, ctx: &egui::Context) {
                                                                 ui,
                                                                 format!("sys:{}", f.path.display()),
                                                                 f.label.clone(),
+                                                                None,
                                                                 true,
                                                             );
                                                         }

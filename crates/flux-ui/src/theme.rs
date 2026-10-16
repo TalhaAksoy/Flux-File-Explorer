@@ -272,17 +272,16 @@ pub fn apply_theme(ctx: &egui::Context, dark: bool) {
 /// Build the font stack from the user's picks: explicit UI/mono choices
 /// go to the front of their families; the OS face remains the fallback.
 /// Fonts compiled into the binary — they always resolve, no download
-/// needed. All are OFL/UFL licensed (see `fonts/FONTS-LICENSES.txt`).
-fn bundled_bytes(key: &str) -> Option<Vec<u8>> {
-    let bytes: &[u8] = match key {
+/// needed. All are OFL/UFL licensed (see `fonts/LICENSES.md`).
+fn bundled_bytes(key: &str) -> Option<&'static [u8]> {
+    Some(match key {
         "jetbrains-nerd" => include_bytes!("../fonts/JetBrainsMonoNerdFont-Regular.ttf"),
         "meslo-nerd" => include_bytes!("../fonts/MesloLGSNerdFont-Regular.ttf"),
         "jetbrains" => include_bytes!("../fonts/JetBrainsMono-Regular.ttf"),
         "fira-sans" => include_bytes!("../fonts/FiraSans-Regular.ttf"),
         "ubuntu" => include_bytes!("../fonts/Ubuntu-Regular.ttf"),
         _ => return None,
-    };
-    Some(bytes.to_vec())
+    })
 }
 
 /// True when the choice's bytes ship inside the binary.
@@ -293,8 +292,41 @@ pub fn is_bundled(key: &str) -> bool {
     )
 }
 
+/// egui family names under which bundled fonts are always registered —
+/// lets pickers render each font name in its own typeface for free
+/// (the bytes are `&'static`, `from_static` copies nothing).
+fn preview_family(key: &str) -> egui::FontFamily {
+    egui::FontFamily::Name(format!("flux-font-{key}").into())
+}
+
+/// The family a bundled font key renders in, if registered.
+pub fn bundled_family(key: &str) -> Option<egui::FontFamily> {
+    is_bundled(key).then(|| preview_family(key))
+}
+
 pub fn load_fonts(ui_key: &str, mono_key: &str) -> egui::FontDefinitions {
     let mut defs = egui::FontDefinitions::default();
+    // Register every bundled font under its own preview family — the
+    // bytes live in the binary, so this is pointer + len, zero copy.
+    for key in [
+        "jetbrains-nerd",
+        "meslo-nerd",
+        "jetbrains",
+        "fira-sans",
+        "ubuntu",
+    ] {
+        if let Some(bytes) = bundled_bytes(key) {
+            let name = preview_family(key).to_string();
+            defs.font_data.insert(
+                name.clone(),
+                std::sync::Arc::new(egui::FontData::from_static(bytes)),
+            );
+            defs.families
+                .entry(preview_family(key))
+                .or_default()
+                .push(name);
+        }
+    }
     let ui_bytes = font_choice_bytes(ui_key, UI_FONTS).or_else(system_font_bytes);
     if let Some(bytes) = ui_bytes {
         let data = egui::FontData::from_owned(bytes);
@@ -305,7 +337,14 @@ pub fn load_fonts(ui_key: &str, mono_key: &str) -> egui::FontDefinitions {
             .or_default()
             .insert(0, "ui-main".into());
     }
-    if let Some(bytes) = font_choice_bytes(mono_key, MONO_FONTS) {
+    // Terminal default is the bundled Nerd Font — file icons work out
+    // of the box, no font install needed.
+    let mono_bytes = if mono_key.is_empty() {
+        bundled_bytes("jetbrains-nerd").map(<[u8]>::to_vec)
+    } else {
+        font_choice_bytes(mono_key, MONO_FONTS)
+    };
+    if let Some(bytes) = mono_bytes {
         let data = egui::FontData::from_owned(bytes);
         defs.font_data
             .insert("mono-main".into(), std::sync::Arc::new(data));
@@ -426,10 +465,10 @@ const MONO_STYLE_WORDS: &[&str] = &[
 pub const MONO_FONTS: &[FontChoice] = &[
     FontChoice {
         key: "",
-        label: "Default mono",
+        label: "JetBrainsMono Nerd Font (default)",
         patterns: &[],
         exclude: &[],
-        nerd: false,
+        nerd: true,
     },
     FontChoice {
         key: "jetbrains-nerd",
@@ -671,7 +710,7 @@ pub fn installed_fonts(list: &'static [FontChoice]) -> Vec<(&'static FontChoice,
 
 fn font_choice_bytes(key: &str, list: &[FontChoice]) -> Option<Vec<u8>> {
     if let Some(b) = bundled_bytes(key) {
-        return Some(b);
+        return Some(b.to_vec());
     }
     if let Some(path) = key.strip_prefix("sys:") {
         return std::fs::read(path).ok();
@@ -947,7 +986,7 @@ mod tests {
         ] {
             let bytes = bundled_bytes(key).expect("bundled");
             let (family, _sub, is_mono) =
-                ttf_meta(&bytes).unwrap_or_else(|| panic!("{key} failed name-table parse"));
+                ttf_meta(bytes).unwrap_or_else(|| panic!("{key} failed name-table parse"));
             assert!(!family.is_empty(), "{key}: empty family");
             assert_eq!(is_mono, mono, "{key}: wrong pitch class ({family})");
         }
