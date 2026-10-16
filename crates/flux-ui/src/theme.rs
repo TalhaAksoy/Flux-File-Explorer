@@ -269,18 +269,365 @@ pub fn apply_theme(ctx: &egui::Context, dark: bool) {
 
 /// System-native UI font, best-effort per platform. Falls back silently
 /// to egui's bundled fonts if nothing on the list parses/loads.
-pub fn load_system_fonts() -> egui::FontDefinitions {
+/// Build the font stack from the user's picks: explicit UI/mono choices
+/// go to the front of their families; the OS face remains the fallback.
+pub fn load_fonts(ui_key: &str, mono_key: &str) -> egui::FontDefinitions {
     let mut defs = egui::FontDefinitions::default();
-    if let Some(bytes) = system_font_bytes() {
+    let ui_bytes = font_choice_bytes(ui_key, UI_FONTS).or_else(system_font_bytes);
+    if let Some(bytes) = ui_bytes {
         let data = egui::FontData::from_owned(bytes);
         defs.font_data
-            .insert("system-ui".into(), std::sync::Arc::new(data));
+            .insert("ui-main".into(), std::sync::Arc::new(data));
         defs.families
             .entry(egui::FontFamily::Proportional)
             .or_default()
-            .insert(0, "system-ui".into());
+            .insert(0, "ui-main".into());
+    }
+    if let Some(bytes) = font_choice_bytes(mono_key, MONO_FONTS) {
+        let data = egui::FontData::from_owned(bytes);
+        defs.font_data
+            .insert("mono-main".into(), std::sync::Arc::new(data));
+        defs.families
+            .entry(egui::FontFamily::Monospace)
+            .or_default()
+            .insert(0, "mono-main".into());
     }
     defs
+}
+
+/// A selectable font — `patterns` are tried in order against normalized
+/// file stems (lowercase, alnum only); `exclude` rejects style variants.
+pub struct FontChoice {
+    pub key: &'static str,
+    pub label: &'static str,
+    pub patterns: &'static [&'static str],
+    pub exclude: &'static [&'static str],
+    pub nerd: bool,
+}
+
+const STYLE_WORDS: &[&str] = &[
+    "bold",
+    "italic",
+    "oblique",
+    "light",
+    "medium",
+    "thin",
+    "black",
+    "semi",
+    "extra",
+    "demi",
+    "hairline",
+    "condensed",
+    "display",
+    "mono",
+];
+
+pub const UI_FONTS: &[FontChoice] = &[
+    FontChoice {
+        key: "",
+        label: "System default",
+        patterns: &[],
+        exclude: &[],
+        nerd: false,
+    },
+    FontChoice {
+        key: "inter",
+        label: "Inter",
+        patterns: &["inter"],
+        exclude: STYLE_WORDS,
+        nerd: false,
+    },
+    FontChoice {
+        key: "roboto",
+        label: "Roboto",
+        patterns: &["robotoregular", "roboto"],
+        exclude: STYLE_WORDS,
+        nerd: false,
+    },
+    FontChoice {
+        key: "noto",
+        label: "Noto Sans",
+        patterns: &["notosansregular", "notosans"],
+        exclude: STYLE_WORDS,
+        nerd: false,
+    },
+    FontChoice {
+        key: "segoe",
+        label: "Segoe UI",
+        patterns: &["segoeui"],
+        exclude: STYLE_WORDS,
+        nerd: false,
+    },
+    FontChoice {
+        key: "ubuntu",
+        label: "Ubuntu",
+        patterns: &["ubuntur", "ubunturegular", "ubuntu"],
+        exclude: STYLE_WORDS,
+        nerd: false,
+    },
+    FontChoice {
+        key: "cantarell",
+        label: "Cantarell",
+        patterns: &["cantarell"],
+        exclude: STYLE_WORDS,
+        nerd: false,
+    },
+];
+
+const MONO_STYLE_WORDS: &[&str] = &[
+    "bold",
+    "italic",
+    "oblique",
+    "light",
+    "thin",
+    "black",
+    "extra",
+    "hairline",
+    "medium",
+    "propo",
+    "condensed",
+    "display",
+    "semi",
+    "demi",
+    "retina",
+];
+
+/// Nerd Fonts first — they carry the glyphs file managers actually use.
+pub const MONO_FONTS: &[FontChoice] = &[
+    FontChoice {
+        key: "",
+        label: "Default mono",
+        patterns: &[],
+        exclude: &[],
+        nerd: false,
+    },
+    FontChoice {
+        key: "jetbrains-nerd",
+        label: "JetBrainsMono Nerd Font",
+        patterns: &[
+            "jetbrainsmononerdfontmono",
+            "jetbrainsmononerdfont",
+            "jetbrainsmonoregularnerdfont",
+        ],
+        exclude: MONO_STYLE_WORDS,
+        nerd: true,
+    },
+    FontChoice {
+        key: "firacode-nerd",
+        label: "FiraCode Nerd Font",
+        patterns: &["firacodenerdfontmono", "firacodenerdfont"],
+        exclude: MONO_STYLE_WORDS,
+        nerd: true,
+    },
+    FontChoice {
+        key: "hack-nerd",
+        label: "Hack Nerd Font",
+        patterns: &["hacknerdfontmono", "hacknerdfont"],
+        exclude: MONO_STYLE_WORDS,
+        nerd: true,
+    },
+    FontChoice {
+        key: "meslo-nerd",
+        label: "MesloLGS Nerd Font",
+        patterns: &["meslolgsnerdfont", "meslolgsnf", "meslolgs"],
+        exclude: MONO_STYLE_WORDS,
+        nerd: true,
+    },
+    FontChoice {
+        key: "cascadia-nerd",
+        label: "CascadiaCode Nerd Font",
+        patterns: &["caskaydiamononerdfont", "caskaydiacodenerdfont"],
+        exclude: MONO_STYLE_WORDS,
+        nerd: true,
+    },
+    FontChoice {
+        key: "jetbrains",
+        label: "JetBrains Mono",
+        patterns: &["jetbrainsmono"],
+        exclude: MONO_STYLE_WORDS,
+        nerd: false,
+    },
+    FontChoice {
+        key: "firacode",
+        label: "Fira Code",
+        patterns: &["firacode"],
+        exclude: MONO_STYLE_WORDS,
+        nerd: false,
+    },
+    FontChoice {
+        key: "cascadia",
+        label: "Cascadia Mono",
+        patterns: &["cascadiamono", "caskaydiamono"],
+        exclude: MONO_STYLE_WORDS,
+        nerd: false,
+    },
+    FontChoice {
+        key: "sf-mono",
+        label: "SF Mono",
+        patterns: &["sfnsmono", "sfmono"],
+        exclude: MONO_STYLE_WORDS,
+        nerd: false,
+    },
+    FontChoice {
+        key: "menlo",
+        label: "Menlo",
+        patterns: &["menlo"],
+        exclude: MONO_STYLE_WORDS,
+        nerd: false,
+    },
+    FontChoice {
+        key: "consolas",
+        label: "Consolas",
+        patterns: &["consola"],
+        exclude: MONO_STYLE_WORDS,
+        nerd: false,
+    },
+    FontChoice {
+        key: "dejavu-mono",
+        label: "DejaVu Sans Mono",
+        patterns: &["dejavusansmono"],
+        exclude: MONO_STYLE_WORDS,
+        nerd: false,
+    },
+    FontChoice {
+        key: "ubuntu-mono",
+        label: "Ubuntu Mono",
+        patterns: &["ubuntumono"],
+        exclude: MONO_STYLE_WORDS,
+        nerd: false,
+    },
+    FontChoice {
+        key: "liberation-mono",
+        label: "Liberation Mono",
+        patterns: &["liberationmono"],
+        exclude: MONO_STYLE_WORDS,
+        nerd: false,
+    },
+];
+
+fn norm_stem(s: &str) -> String {
+    s.chars()
+        .filter(|c| c.is_alphanumeric())
+        .flat_map(|c| c.to_lowercase())
+        .collect()
+}
+
+static FONT_FILES: std::sync::OnceLock<Vec<std::path::PathBuf>> = std::sync::OnceLock::new();
+
+/// All font files under the platform's standard roots — scanned once.
+fn font_files() -> &'static [std::path::PathBuf] {
+    FONT_FILES
+        .get_or_init(|| {
+            let mut files = Vec::new();
+            for root in font_roots() {
+                collect_font_files(&root, 0, &mut files);
+            }
+            // Deterministic order — first-pattern-match shouldn't depend
+            // on readdir luck.
+            files.sort();
+            files
+        })
+        .as_slice()
+}
+
+fn font_roots() -> Vec<std::path::PathBuf> {
+    let mut roots = Vec::new();
+    #[cfg(target_os = "macos")]
+    {
+        roots.push("/System/Library/Fonts".into());
+        roots.push("/System/Library/Fonts/Supplemental".into());
+        roots.push("/Library/Fonts".into());
+        if let Ok(home) = std::env::var("HOME") {
+            roots.push(std::path::Path::new(&home).join("Library/Fonts"));
+        }
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let win = std::env::var("WINDIR").unwrap_or_else(|_| "C:\\Windows".into());
+        roots.push(std::path::Path::new(&win).join("Fonts"));
+        if let Ok(local) = std::env::var("LOCALAPPDATA") {
+            roots.push(std::path::Path::new(&local).join("Microsoft/Windows/Fonts"));
+        }
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        roots.push("/usr/share/fonts".into());
+        roots.push("/usr/local/share/fonts".into());
+        if let Ok(home) = std::env::var("HOME") {
+            roots.push(std::path::Path::new(&home).join(".local/share/fonts"));
+            roots.push(std::path::Path::new(&home).join(".fonts"));
+        }
+    }
+    roots
+}
+
+/// The installed file for a choice, if any (None = sentinel/default or
+/// not installed). Pattern order in the table is the priority order.
+pub fn installed_font_file(choice: &FontChoice) -> Option<std::path::PathBuf> {
+    for pat in choice.patterns {
+        let pat = norm_stem(pat);
+        let mut fallback: Option<std::path::PathBuf> = None;
+        for f in font_files() {
+            let Some(raw) = f.file_stem().map(|s| s.to_string_lossy()) else {
+                continue;
+            };
+            // Variable fonts can be rejected by the rasterizer.
+            if raw.contains('[')
+                || raw.ends_with("-vf")
+                || raw.ends_with("_vf")
+                || raw.ends_with("-VF")
+                || raw.ends_with("_VF")
+            {
+                continue;
+            }
+            let stem = norm_stem(&raw);
+            if !stem.contains(&pat) || choice.exclude.iter().any(|e| stem.contains(&norm_stem(e))) {
+                continue;
+            }
+            // An explicit "regular" face wins over a bare stem (Menlo,
+            // SFNSMono, consola…) and its unknown suffixes.
+            if stem.contains("regular") {
+                return Some(f.clone());
+            }
+            fallback.get_or_insert_with(|| f.clone());
+        }
+        if fallback.is_some() {
+            return fallback;
+        }
+    }
+    None
+}
+
+/// Choices that resolve to a real file — for pickers that only offer
+/// what's actually installed.
+/// Cached per-choice install flags — the file scan happens once per list,
+/// not per frame while a picker is open.
+fn installed_flags(list: &'static [FontChoice]) -> &'static [bool] {
+    static UI: std::sync::OnceLock<Vec<bool>> = std::sync::OnceLock::new();
+    static MONO: std::sync::OnceLock<Vec<bool>> = std::sync::OnceLock::new();
+    let slot = if std::ptr::eq(list, UI_FONTS) {
+        &UI
+    } else {
+        &MONO
+    };
+    slot.get_or_init(|| {
+        list.iter()
+            .map(|c| c.patterns.is_empty() || installed_font_file(c).is_some())
+            .collect()
+    })
+}
+
+pub fn installed_fonts(list: &'static [FontChoice]) -> Vec<(&'static FontChoice, bool)> {
+    list.iter()
+        .zip(installed_flags(list))
+        .map(|(c, i)| (c, *i))
+        .collect()
+}
+
+fn font_choice_bytes(key: &str, list: &[FontChoice]) -> Option<Vec<u8>> {
+    let choice = list.iter().find(|c| c.key == key)?;
+    let path = installed_font_file(choice)?;
+    std::fs::read(path).ok()
 }
 
 fn system_font_bytes() -> Option<Vec<u8>> {
@@ -384,7 +731,6 @@ fn scan_font_dirs() -> Option<Vec<u8>> {
     None
 }
 
-#[cfg(all(unix, not(target_os = "macos")))]
 fn collect_font_files(dir: &std::path::Path, depth: u8, out: &mut Vec<std::path::PathBuf>) {
     if depth > 4 {
         return;

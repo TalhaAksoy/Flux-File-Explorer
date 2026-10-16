@@ -998,7 +998,11 @@ pub fn run(start_dir: Option<PathBuf>) -> eframe::Result<()> {
             if let Some(d) = start_dir.filter(|d| d.is_dir()) {
                 app.navigate(d);
             }
-            cc.egui_ctx.set_fonts(theme::load_system_fonts());
+            cc.egui_ctx.set_fonts(theme::load_fonts(
+                &app.settings.ui_font,
+                &app.settings.mono_font,
+            ));
+            cc.egui_ctx.set_zoom_factor(app.settings.ui_scale);
             if app.settings.theme == flux_settings::Theme::System {
                 app.dark = matches!(cc.egui_ctx.system_theme(), Some(egui::Theme::Dark));
             }

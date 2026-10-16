@@ -23,6 +23,18 @@ fn heading(ui: &mut egui::Ui, title: &str) {
     ui.label(egui::RichText::new(title).size(16.0).strong());
 }
 
+/// Muted uppercase section divider used by the Settings dialog.
+fn section(ui: &mut egui::Ui, pal: &crate::theme::Palette, title: &str) {
+    ui.add_space(4.0);
+    ui.label(
+        egui::RichText::new(title)
+            .color(pal.text_muted)
+            .size(10.5)
+            .strong(),
+    );
+    ui.add_space(2.0);
+}
+
 /// Right-aligned [primary][Cancel] footer. Returns (primary, cancel).
 fn footer(ui: &mut egui::Ui, primary: &str, primary_enabled: bool) -> (bool, bool) {
     let mut clicked = (false, false);
@@ -316,6 +328,289 @@ pub fn show(app: &mut FluxApp, ctx: &egui::Context) {
                     if _p || cancel {
                         close = true;
                     }
+                });
+        }
+        Dialog::Settings => {
+            card("Settings")
+                .default_width(430.0)
+                .max_height(560.0)
+                .show(ctx, |ui| {
+                    egui::ScrollArea::vertical()
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            let pal = crate::theme::Palette::of(&ui.style().visuals);
+                            heading(ui, "Settings");
+                            ui.add_space(2.0);
+
+                            // —— Fonts ——
+                            section(ui, &pal, "FONTS");
+                            let mut fonts_changed = false;
+                            let font_row =
+                                |ui: &mut egui::Ui,
+                                 label: &str,
+                                 key: &mut String,
+                                 list: &'static [crate::theme::FontChoice],
+                                 changed: &mut bool| {
+                                    ui.horizontal(|ui| {
+                                        ui.label(
+                                            egui::RichText::new(label)
+                                                .color(pal.text_secondary)
+                                                .size(13.0),
+                                        );
+                                        ui.with_layout(
+                                            egui::Layout::right_to_left(egui::Align::Center),
+                                            |ui| {
+                                                let flags = crate::theme::installed_fonts(list);
+                                                let cur = list
+                                                    .iter()
+                                                    .position(|c| c.key == *key)
+                                                    .map(|i| {
+                                                        if flags[i].1 {
+                                                            list[i].label.to_string()
+                                                        } else {
+                                                            format!(
+                                                                "{} (not installed)",
+                                                                list[i].label
+                                                            )
+                                                        }
+                                                    })
+                                                    .unwrap_or_else(|| list[0].label.to_string());
+                                                egui::ComboBox::from_id_salt(label)
+                                                    .width(210.0)
+                                                    .selected_text(
+                                                        egui::RichText::new(cur).size(13.0),
+                                                    )
+                                                    .show_ui(ui, |ui| {
+                                                        for (c, installed) in
+                                                            crate::theme::installed_fonts(list)
+                                                        {
+                                                            let text = if installed {
+                                                                c.label.to_string()
+                                                            } else {
+                                                                format!(
+                                                                    "{} (not installed)",
+                                                                    c.label
+                                                                )
+                                                            };
+                                                            let resp = ui.add_enabled(
+                                                                installed,
+                                                                egui::Button::selectable(
+                                                                    *key == c.key,
+                                                                    text,
+                                                                ),
+                                                            );
+                                                            if resp.clicked() {
+                                                                *key = c.key.to_string();
+                                                                *changed = true;
+                                                            }
+                                                        }
+                                                    });
+                                            },
+                                        );
+                                    });
+                                };
+                            font_row(
+                                ui,
+                                "Interface font",
+                                &mut app.settings.ui_font,
+                                crate::theme::UI_FONTS,
+                                &mut fonts_changed,
+                            );
+                            font_row(
+                                ui,
+                                "Terminal font",
+                                &mut app.settings.mono_font,
+                                crate::theme::MONO_FONTS,
+                                &mut fonts_changed,
+                            );
+                            if !crate::theme::installed_fonts(crate::theme::MONO_FONTS)
+                                .iter()
+                                .any(|(c, i)| c.nerd && *i)
+                            {
+                                ui.label(
+                                    egui::RichText::new(
+                                        "No Nerd Font detected — JetBrainsMono Nerd Font gives \
+                                 the terminal proper file icons.",
+                                    )
+                                    .color(pal.text_muted)
+                                    .size(11.0)
+                                    .italics(),
+                                );
+                            }
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    egui::RichText::new("Terminal size")
+                                        .color(pal.text_secondary)
+                                        .size(13.0),
+                                );
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        ui.add(
+                                            egui::DragValue::new(
+                                                &mut app.settings.terminal_font_size,
+                                            )
+                                            .range(9.0..=20.0)
+                                            .speed(0.1)
+                                            .suffix(" pt"),
+                                        );
+                                    },
+                                );
+                            });
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    egui::RichText::new("Interface scale")
+                                        .color(pal.text_secondary)
+                                        .size(13.0),
+                                );
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        ui.label(
+                                            egui::RichText::new(format!(
+                                                "{:.0}%",
+                                                app.settings.ui_scale * 100.0
+                                            ))
+                                            .color(pal.text_muted)
+                                            .size(12.0),
+                                        );
+                                        if ui
+                                            .add(
+                                                egui::Slider::new(
+                                                    &mut app.settings.ui_scale,
+                                                    0.85..=1.3,
+                                                )
+                                                .show_value(false),
+                                            )
+                                            .changed()
+                                        {
+                                            ctx.set_zoom_factor(app.settings.ui_scale);
+                                        }
+                                    },
+                                );
+                            });
+                            if fonts_changed {
+                                ctx.set_fonts(crate::theme::load_fonts(
+                                    &app.settings.ui_font,
+                                    &app.settings.mono_font,
+                                ));
+                            }
+
+                            // —— Typography preview ——
+                            ui.add_space(6.0);
+                            section(ui, &pal, "TYPOGRAPHY");
+                            let sample = |ui: &mut egui::Ui,
+                                          name: &str,
+                                          size: f32,
+                                          strong: bool,
+                                          mono: bool,
+                                          text: &str| {
+                                ui.horizontal(|ui| {
+                                    ui.add_sized(
+                                        [86.0, 20.0],
+                                        egui::Label::new(
+                                            egui::RichText::new(name)
+                                                .color(pal.text_muted)
+                                                .size(11.0),
+                                        ),
+                                    );
+                                    let font = if mono {
+                                        egui::FontId::monospace(size)
+                                    } else {
+                                        egui::FontId::proportional(size)
+                                    };
+                                    let mut rt = egui::RichText::new(text)
+                                        .font(font)
+                                        .color(pal.text_primary);
+                                    if strong {
+                                        rt = rt.strong();
+                                    }
+                                    ui.label(rt);
+                                    ui.label(
+                                        egui::RichText::new(format!("{size}pt"))
+                                            .color(pal.text_muted)
+                                            .size(10.5),
+                                    );
+                                });
+                            };
+                            sample(ui, "Toolbar", 15.0, false, false, "Flux Files — Pictures");
+                            sample(
+                                ui,
+                                "Body",
+                                14.0,
+                                false,
+                                false,
+                                "Documents · Downloads · report.pdf",
+                            );
+                            sample(
+                                ui,
+                                "Selected",
+                                14.0,
+                                true,
+                                false,
+                                "Photos Library.photoslibrary",
+                            );
+                            sample(
+                                ui,
+                                "Metadata",
+                                12.0,
+                                false,
+                                false,
+                                "17 Sep 2026 · 21.1 MB · Zip",
+                            );
+                            sample(ui, "Status", 11.5, false, false, "3 items · 15.2 GB free");
+                            sample(
+                                ui,
+                                "Terminal",
+                                app.settings.terminal_font_size,
+                                false,
+                                true,
+                                "→ Pictures $ ls -l ~/Projects",
+                            );
+
+                            // —— Appearance ——
+                            ui.add_space(6.0);
+                            section(ui, &pal, "APPEARANCE");
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    egui::RichText::new("Theme")
+                                        .color(pal.text_secondary)
+                                        .size(13.0),
+                                );
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        for (label, val) in [
+                                            ("System", flux_settings::Theme::System),
+                                            ("Light", flux_settings::Theme::Light),
+                                            ("Dark", flux_settings::Theme::Dark),
+                                        ] {
+                                            if ui
+                                                .selectable_label(app.settings.theme == val, label)
+                                                .clicked()
+                                            {
+                                                app.settings.theme = val;
+                                                app.dark = match val {
+                                                    flux_settings::Theme::System => ctx
+                                                        .system_theme()
+                                                        .is_some_and(|t| t == egui::Theme::Dark),
+                                                    flux_settings::Theme::Dark => true,
+                                                    flux_settings::Theme::Light => false,
+                                                };
+                                                crate::theme::apply_theme(ctx, app.dark);
+                                            }
+                                        }
+                                    },
+                                );
+                            });
+
+                            // —— Save —— (changes apply live; both buttons close)
+                            let (done, cancel) = footer(ui, "Done", true);
+                            if done || cancel {
+                                app.save_settings();
+                                close = true;
+                            }
+                        });
                 });
         }
         Dialog::About => {

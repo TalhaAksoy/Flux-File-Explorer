@@ -118,26 +118,37 @@ pub fn toolbar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
         let tab = app.current_tab();
         let can_back = tab.history.can_back();
         let can_fwd = tab.history.can_forward();
-        if glyphs::icon_button(ui, glyphs::Glyph::Back, "Back (Alt+Left)", can_back).clicked() {
-            act.back = true;
-        }
-        if glyphs::icon_button(ui, glyphs::Glyph::Forward, "Forward (Alt+Right)", can_fwd).clicked()
-        {
-            act.forward = true;
-        }
-        if glyphs::icon_button(ui, glyphs::Glyph::Up, "Up (Backspace)", true).clicked() {
-            act.up = true;
-        }
-        if glyphs::icon_button(ui, glyphs::Glyph::Refresh, "Refresh (F5)", true).clicked() {
-            act.refresh = true;
-        }
-        ui.add_space(8.0);
+        let pal = crate::theme::Palette::of(&ui.style().visuals);
+        // Section plates — a faint elevated surface behind each control
+        // group so toolbar regions read as units, not a wall of icons.
+        let plate = egui::Frame::default()
+            .fill(pal.bg_elevated)
+            .corner_radius(egui::CornerRadius::same(8))
+            .inner_margin(egui::Margin::same(2));
+        plate.show(ui, |ui| {
+            ui.spacing_mut().item_spacing.x = 2.0;
+            if glyphs::icon_button(ui, glyphs::Glyph::Back, "Back (Alt+Left)", can_back).clicked() {
+                act.back = true;
+            }
+            if glyphs::icon_button(ui, glyphs::Glyph::Forward, "Forward (Alt+Right)", can_fwd)
+                .clicked()
+            {
+                act.forward = true;
+            }
+            if glyphs::icon_button(ui, glyphs::Glyph::Up, "Up (Backspace)", true).clicked() {
+                act.up = true;
+            }
+            if glyphs::icon_button(ui, glyphs::Glyph::Refresh, "Refresh (F5)", true).clicked() {
+                act.refresh = true;
+            }
+        });
+        ui.add_space(6.0);
 
         // Breadcrumb or editable path field.
         if let Some(text) = &mut app.address_edit {
             let id = egui::Id::new("address_bar");
             let resp = ui.add_sized(
-                [ui.available_width() - 260.0, 26.0],
+                [ui.available_width() - 320.0, 26.0],
                 egui::TextEdit::singleline(text)
                     .margin(egui::Margin::symmetric(10, 4))
                     .id(id),
@@ -161,70 +172,76 @@ pub fn toolbar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
                 cur = p.parent();
             }
             crumbs.reverse();
-            let pal = crate::theme::Palette::of(&ui.style().visuals);
-            egui::ScrollArea::horizontal()
-                .id_salt("crumbs")
-                .max_width(ui.available_width() - 260.0)
-                .show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing.x = 2.0;
-                        let n = crumbs.len();
-                        for (i, c) in crumbs.into_iter().enumerate() {
-                            let label = c
-                                .file_name()
-                                .map(|n| n.to_string_lossy().into_owned())
-                                .unwrap_or_else(|| c.display().to_string());
-                            let last = i == n - 1;
-                            // Ghost crumb: quiet text, pill hover, accent
-                            // only for the current directory.
-                            let size = egui::vec2(
-                                ui.painter()
-                                    .layout_no_wrap(
-                                        label.clone(),
-                                        egui::FontId::proportional(14.0),
-                                        pal.text_secondary,
-                                    )
-                                    .size()
-                                    .x
-                                    + 14.0,
-                                26.0,
-                            );
-                            let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
-                            if resp.hovered() {
-                                ui.painter().rect_filled(
-                                    rect,
-                                    egui::CornerRadius::same(6),
-                                    pal.surface_hover,
+            let crumb_plate = egui::Frame::default()
+                .fill(pal.field_inset)
+                .corner_radius(egui::CornerRadius::same(8))
+                .inner_margin(egui::Margin::symmetric(6, 1));
+            crumb_plate.show(ui, |ui| {
+                egui::ScrollArea::horizontal()
+                    .id_salt("crumbs")
+                    .max_width(ui.available_width() - 320.0)
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 2.0;
+                            let n = crumbs.len();
+                            for (i, c) in crumbs.into_iter().enumerate() {
+                                let label = c
+                                    .file_name()
+                                    .map(|n| n.to_string_lossy().into_owned())
+                                    .unwrap_or_else(|| c.display().to_string());
+                                let last = i == n - 1;
+                                // Ghost crumb: quiet text, pill hover, accent
+                                // only for the current directory.
+                                let size = egui::vec2(
+                                    ui.painter()
+                                        .layout_no_wrap(
+                                            label.clone(),
+                                            egui::FontId::proportional(14.0),
+                                            pal.text_secondary,
+                                        )
+                                        .size()
+                                        .x
+                                        + 14.0,
+                                    26.0,
                                 );
-                            }
-                            ui.painter().text(
-                                rect.center(),
-                                egui::Align2::CENTER_CENTER,
-                                &label,
-                                egui::FontId::proportional(14.0),
-                                if last {
-                                    pal.text_primary
-                                } else {
-                                    pal.text_secondary
-                                },
-                            );
-                            drop_target(app, ui, &resp, &c, act);
-                            if resp.clicked() {
-                                act.navigate = Some(c.clone());
-                            }
-                            if !last {
+                                let (rect, resp) =
+                                    ui.allocate_exact_size(size, egui::Sense::click());
+                                if resp.hovered() {
+                                    ui.painter().rect_filled(
+                                        rect,
+                                        egui::CornerRadius::same(6),
+                                        pal.surface_hover,
+                                    );
+                                }
                                 ui.painter().text(
-                                    egui::pos2(rect.right() + 7.0, rect.center().y),
+                                    rect.center(),
                                     egui::Align2::CENTER_CENTER,
-                                    "›",
-                                    egui::FontId::proportional(13.0),
-                                    pal.text_muted,
+                                    &label,
+                                    egui::FontId::proportional(14.0),
+                                    if last {
+                                        pal.text_primary
+                                    } else {
+                                        pal.text_secondary
+                                    },
                                 );
-                                ui.add_space(10.0);
+                                drop_target(app, ui, &resp, &c, act);
+                                if resp.clicked() {
+                                    act.navigate = Some(c.clone());
+                                }
+                                if !last {
+                                    ui.painter().text(
+                                        egui::pos2(rect.right() + 7.0, rect.center().y),
+                                        egui::Align2::CENTER_CENTER,
+                                        "›",
+                                        egui::FontId::proportional(13.0),
+                                        pal.text_muted,
+                                    );
+                                    ui.add_space(10.0);
+                                }
                             }
-                        }
+                        });
                     });
-                });
+            });
             // The background interact was registered before the buttons —
             // it only wins clicks that land on empty space.
             if crumb_edit.clicked() {
@@ -234,6 +251,10 @@ pub fn toolbar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
         }
 
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if glyphs::icon_button(ui, glyphs::Glyph::Gear, "Settings", true).clicked() {
+                app.dialog = crate::app::Dialog::Settings;
+            }
+            ui.add_space(4.0);
             // Search mode toggle + filter/search box.
             let resp = ui.add_sized(
                 [200.0, 26.0],

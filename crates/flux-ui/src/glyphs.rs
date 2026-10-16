@@ -19,6 +19,8 @@ pub enum Glyph {
     Terminal,
     /// Open in external app (box with arrow exiting NE).
     External,
+    /// Cogwheel — settings.
+    Gear,
 }
 
 /// Draw `g` centered inside `rect` with the given color.
@@ -138,6 +140,15 @@ pub fn paint_glyph(p: &egui::Painter, rect: Rect, g: Glyph, color: Color32) {
             p.line_segment([Pos2::new(c.x - r * 0.05, c.y + r * 0.05), to], st);
             for d in [egui::vec2(-0.45, 0.0), egui::vec2(0.0, 0.45)] {
                 p.line_segment([to, to + d * r], st);
+            }
+        }
+        Glyph::Gear => {
+            // Hub circle + 8 teeth spokes.
+            p.circle_stroke(c, r * 0.34, st);
+            for i in 0..8 {
+                let a = i as f32 * std::f32::consts::TAU / 8.0;
+                let d = egui::vec2(a.cos(), a.sin());
+                p.line_segment([c + d * (r * 0.5), c + d * (r * 0.78)], st);
             }
         }
     }

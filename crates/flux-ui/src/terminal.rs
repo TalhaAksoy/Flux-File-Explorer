@@ -420,7 +420,7 @@ impl FluxApp {
         let term = self.terminal.as_mut().unwrap();
         term.drain_events();
 
-        let mono = egui::FontId::monospace(12.5);
+        let mono = egui::FontId::monospace(self.settings.terminal_font_size);
         // `glyph_width`/`row_height` lazily load fonts → need &mut Fonts.
         let (cell_w, line_h) = ui
             .ctx()

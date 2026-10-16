@@ -55,6 +55,7 @@ pub enum Dialog {
         /// thread on slow/network filesystems.
         meta: Option<crate::dialogs::PropsMeta>,
     },
+    Settings,
     About,
 }
 

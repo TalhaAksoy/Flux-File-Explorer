@@ -42,6 +42,24 @@ pub struct Settings {
     pub sort_key: String,
     pub sort_desc: bool,
     pub dirs_first: bool,
+    /// Key into the UI font-choice table ("" = system default).
+    #[serde(default)]
+    pub ui_font: String,
+    /// Key into the mono font-choice table ("" = default).
+    #[serde(default)]
+    pub mono_font: String,
+    #[serde(default = "default_terminal_font_size")]
+    pub terminal_font_size: f32,
+    /// Whole-app interface scale (egui zoom factor).
+    #[serde(default = "default_ui_scale")]
+    pub ui_scale: f32,
+}
+
+fn default_terminal_font_size() -> f32 {
+    12.5
+}
+fn default_ui_scale() -> f32 {
+    1.0
 }
 
 impl Default for Settings {
@@ -60,6 +78,10 @@ impl Default for Settings {
             sort_key: "name".into(),
             sort_desc: false,
             dirs_first: true,
+            ui_font: String::new(),
+            mono_font: String::new(),
+            terminal_font_size: default_terminal_font_size(),
+            ui_scale: default_ui_scale(),
         }
     }
 }
