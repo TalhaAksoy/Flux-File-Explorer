@@ -228,10 +228,17 @@ pub fn file_table(app: &mut FluxApp, ui: &mut egui::Ui) -> RowAction {
 
     let mut vis_min = EntryIdx::MAX;
     let mut vis_max = 0;
+    let mut live_widths: Option<[f32; 4]> = None;
     builder.header(22.0, header).body(|body| {
+        // Read widths BEFORE rows() consumes the body — reflects the
+        // resize state already applied for this frame.
+        let w = body.widths();
+        if w.len() == 4 {
+            live_widths = Some([w[0], w[1], w[2], w[3]]);
+        }
         body.rows(row_h, view_len, |mut row| {
             let row_idx = row.index();
-            let (idx, name, kind, size, mtime, ext, icon_key, abs_path) = {
+            let (idx, name, kind, size, mtime, ext, icon_key, abs_path, hidden) = {
                 let s = match snap.read() {
                     Ok(s) => s,
                     Err(_) => return,
@@ -248,6 +255,7 @@ pub fn file_table(app: &mut FluxApp, ui: &mut egui::Ui) -> RowAction {
                     e.extension().map(|x| x.to_string_lossy().into_owned()),
                     crate::icon_cache::IconKey::for_entry(e, &s.path.join(&e.name)),
                     s.path.join(&e.name),
+                    e.hidden,
                 )
             };
 
@@ -256,6 +264,8 @@ pub fn file_table(app: &mut FluxApp, ui: &mut egui::Ui) -> RowAction {
             let selected = sel.contains(idx);
             row.set_selected(selected);
 
+            // Explorer ghosts revealed hidden items — dim icon + text.
+            let ghost = if hidden { 0.55 } else { 1.0 };
             row.col(|ui| {
                 let rect = ui.available_rect_before_wrap();
                 let icon_rect = row_icon_rect(rect, row_h);
@@ -265,7 +275,7 @@ pub fn file_table(app: &mut FluxApp, ui: &mut egui::Ui) -> RowAction {
                             tex,
                             icon_rect,
                             egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                            Color32::WHITE,
+                            Color32::WHITE.gamma_multiply(ghost),
                         );
                     }
                     None => paint_entry_icon(ui.painter(), icon_rect, kind, &pal),
@@ -276,15 +286,16 @@ pub fn file_table(app: &mut FluxApp, ui: &mut egui::Ui) -> RowAction {
                     egui::Align2::LEFT_CENTER,
                     &name,
                     egui::FontId::default(),
-                    pal.text_primary,
+                    pal.text_primary.gamma_multiply(ghost),
                 );
             });
             // Metadata is secondary information — quieter color.
+            let meta_col = pal.text_secondary.gamma_multiply(ghost);
             row.col(|ui| {
-                ui.label(egui::RichText::new(format_size(size)).color(pal.text_secondary));
+                ui.label(egui::RichText::new(format_size(size)).color(meta_col));
             });
             row.col(|ui| {
-                ui.label(egui::RichText::new(format_mtime(mtime)).color(pal.text_secondary));
+                ui.label(egui::RichText::new(format_mtime(mtime)).color(meta_col));
             });
             row.col(|ui| {
                 ui.label(
@@ -293,7 +304,7 @@ pub fn file_table(app: &mut FluxApp, ui: &mut egui::Ui) -> RowAction {
                         EntryKind::Symlink => "Link",
                         _ => flux_platform::type_label(ext.as_deref()),
                     })
-                    .color(pal.text_secondary),
+                    .color(meta_col),
                 );
             });
 
@@ -337,6 +348,14 @@ pub fn file_table(app: &mut FluxApp, ui: &mut egui::Ui) -> RowAction {
 
     if vis_min <= vis_max {
         action.visible_range = Some((vis_min, vis_max));
+    }
+    // Persist user-resized column widths — debounced: mark dirty here,
+    // the app writes the settings file once resizing has been quiet.
+    if let Some(w) = live_widths
+        && w != app.settings.column_widths
+    {
+        app.settings.column_widths = w;
+        app.settings_dirty_at = Some(std::time::Instant::now());
     }
     let _ = focus_row;
     action

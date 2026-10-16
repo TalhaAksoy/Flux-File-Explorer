@@ -305,6 +305,10 @@ pub struct FluxApp {
     pub sidebar_drag: Option<SidebarDrag>,
     /// Docked embedded terminal panel (None = closed).
     pub terminal: Option<crate::terminal::EmbeddedTerm>,
+    /// Debounce marker for settings writes: set when a frame mutates
+    /// persisted state (e.g. column resize); flushed after a quiet period
+    /// so resizing doesn't write settings.json every frame.
+    pub settings_dirty_at: Option<Instant>,
 }
 
 /// Which sidebar section a reorder drag belongs to — a path that exists in
@@ -361,6 +365,7 @@ impl FluxApp {
         {
             let mut s = tabs[0].snap.write().unwrap();
             s.show_hidden = settings.show_hidden;
+            s.show_system = settings.show_system_files;
             s.sort = sort_from_settings(&settings);
         }
         let dark = match settings.theme {
@@ -412,6 +417,7 @@ impl FluxApp {
             wake_installed: false,
             sidebar_drag: None,
             terminal: None,
+            settings_dirty_at: None,
         }
     }
 
@@ -565,6 +571,7 @@ impl FluxApp {
         {
             let mut s = t.snap.write().unwrap();
             s.show_hidden = self.settings.show_hidden;
+            s.show_system = self.settings.show_system_files;
         }
         self.tabs.push(t);
         self.active = self.tabs.len() - 1;
@@ -576,6 +583,7 @@ impl FluxApp {
         {
             let mut s = t.snap.write().unwrap();
             s.show_hidden = self.settings.show_hidden;
+            s.show_system = self.settings.show_system_files;
         }
         self.tabs.push(t);
         self.active = self.tabs.len() - 1;
@@ -669,6 +677,31 @@ impl FluxApp {
         let snap = tab.snap.clone();
         self.compute.rebuild(&snap, g);
         self.save_settings();
+    }
+
+    /// Explorer's "hide protected operating system files" gate — a
+    /// separate, stronger filter than `show_hidden` (Windows attributes;
+    /// harmless no-op elsewhere). Used by the Settings dialog live preview.
+    pub fn set_show_system_files(&mut self, show: bool) {
+        self.settings.show_system_files = show;
+        let tab = self.current_tab_mut();
+        {
+            let mut s = tab.snap.write().unwrap();
+            s.show_system = show;
+        }
+        let g = tab.gen_id;
+        let snap = tab.snap.clone();
+        self.compute.rebuild(&snap, g);
+    }
+
+    /// Flush debounced settings writes once they've been quiet long
+    /// enough. Called every frame; `on_exit` persists unconditionally.
+    pub fn flush_settings_debounce(&mut self) {
+        const QUIET: std::time::Duration = std::time::Duration::from_millis(1200);
+        if self.settings_dirty_at.is_some_and(|t| t.elapsed() >= QUIET) {
+            self.settings_dirty_at = None;
+            self.save_settings();
+        }
     }
 
     pub fn save_settings(&mut self) {

@@ -40,6 +40,9 @@ pub struct DirSnapshot {
     pub sort: SortSpec,
     pub filter: Option<String>,
     pub show_hidden: bool,
+    /// Show hidden+system "protected operating system files" (Windows).
+    /// Independent of `show_hidden`, mirroring Explorer's separate option.
+    pub show_system: bool,
     /// Generation of the enumeration filling this snapshot.
     pub generation: u64,
     /// Bumped on every mutation; lets the UI detect changes cheaply.
@@ -47,6 +50,18 @@ pub struct DirSnapshot {
 }
 
 pub type SnapshotHandle = Arc<RwLock<DirSnapshot>>;
+
+/// One entry's refreshed metadata, produced by the deferred stat worker.
+/// `hidden`/`system` come along for free on Windows (file attributes ride
+/// in the same metadata call); elsewhere `system` is always false.
+pub struct MetaFill {
+    pub idx: EntryIdx,
+    pub size: u64,
+    pub mtime: Option<std::time::SystemTime>,
+    pub readonly: bool,
+    pub hidden: bool,
+    pub system: bool,
+}
 
 impl DirSnapshot {
     pub fn new(path: PathBuf) -> Self {
@@ -58,6 +73,7 @@ impl DirSnapshot {
             sort: SortSpec::default(),
             filter: None,
             show_hidden: false,
+            show_system: false,
             generation: 0,
             version: 0,
         }
@@ -85,10 +101,11 @@ impl DirSnapshot {
         self.entries.append(batch);
         let filter = self.filter.as_deref();
         let show_hidden = self.show_hidden;
+        let show_system = self.show_system;
         self.view
             .extend((base..self.entries.len() as EntryIdx).filter(|&i| {
                 let e = &self.entries[i as usize];
-                (show_hidden || !e.hidden) && e.matches_filter(filter)
+                e.visible(show_hidden, show_system) && e.matches_filter(filter)
             }));
         self.state = LoadState::Loading {
             received: self.entries.len(),
@@ -106,12 +123,14 @@ impl DirSnapshot {
     /// Apply background-statted metadata to entries in place. Indices are
     /// stable (entries are append-only), so this is safe mid-view. The
     /// version bump lets in-flight compute work notice fresher data.
-    pub fn apply_meta(&mut self, items: &[(EntryIdx, u64, Option<std::time::SystemTime>, bool)]) {
-        for &(i, size, mtime, readonly) in items {
-            if let Some(e) = self.entries.get_mut(i as usize) {
-                e.size = size;
-                e.mtime = mtime;
-                e.readonly = readonly;
+    pub fn apply_meta(&mut self, items: &[MetaFill]) {
+        for it in items {
+            if let Some(e) = self.entries.get_mut(it.idx as usize) {
+                e.size = it.size;
+                e.mtime = it.mtime;
+                e.readonly = it.readonly;
+                e.hidden = it.hidden;
+                e.system = it.system;
             }
         }
         self.version += 1;

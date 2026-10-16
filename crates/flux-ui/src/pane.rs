@@ -208,12 +208,13 @@ impl Tab {
     }
 
     /// Lazy tab for session restore: knows its path, loads on activation.
-    pub fn deferred(path: PathBuf, sort: SortSpec, show_hidden: bool) -> Self {
+    pub fn deferred(path: PathBuf, sort: SortSpec, show_hidden: bool, show_system: bool) -> Self {
         let mut t = Self::new(path);
         {
             let mut s = t.snap.write().unwrap();
             s.sort = sort;
             s.show_hidden = show_hidden;
+            s.show_system = show_system;
         }
         t.deferred_load = true;
         t

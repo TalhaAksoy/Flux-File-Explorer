@@ -198,17 +198,19 @@ pub fn cmp_entries(a: &DirEntry, b: &DirEntry, spec: &SortSpec) -> Ordering {
 }
 
 /// Build the ordered index list for `entries` under `spec`, restricted to
-/// entries passing `filter` and the hidden-file policy.
+/// entries passing `filter` and the hidden-file policy. `show_system`
+/// reveals hidden+system "protected" files (Windows; no-op elsewhere).
 pub fn build_view(
     entries: &[DirEntry],
     spec: &SortSpec,
     filter: Option<&str>,
     include_hidden: bool,
+    show_system: bool,
 ) -> Vec<u32> {
     let mut view: Vec<u32> = entries
         .iter()
         .enumerate()
-        .filter(|(_, e)| (include_hidden || !e.hidden) && e.matches_filter(filter))
+        .filter(|(_, e)| e.visible(include_hidden, show_system) && e.matches_filter(filter))
         .map(|(i, _)| i as u32)
         .collect();
     view.sort_unstable_by(|&ia, &ib| {

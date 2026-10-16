@@ -346,6 +346,8 @@ pub fn show(app: &mut FluxApp, ctx: &egui::Context) {
                 ctx.set_fonts(crate::theme::load_fonts(&orig.ui_font, &orig.mono_font));
                 app.apply_ui_scale(ctx);
                 crate::theme::apply_theme(ctx, dark);
+                // Live-preferred view flags also revert.
+                app.set_show_system_files(orig.show_system_files);
             };
             if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
                 revert(app, ctx);
@@ -685,6 +687,30 @@ pub fn show(app: &mut FluxApp, ctx: &egui::Context) {
                                 false,
                                 true,
                                 "→ Pictures $ ls -l ~/Projects",
+                            );
+
+                            // —— Files ——
+                            ui.add_space(6.0);
+                            section(ui, &pal, "FILES");
+                            let sys_label = if cfg!(windows) {
+                                "Show protected operating system files"
+                            } else {
+                                "Show protected operating system files (Windows)"
+                            };
+                            if ui
+                                .checkbox(&mut app.settings.show_system_files, sys_label)
+                                .changed()
+                            {
+                                let v = app.settings.show_system_files;
+                                app.set_show_system_files(v);
+                            }
+                            ui.label(
+                                egui::RichText::new(
+                                    "Files Windows marks as both hidden and system — shown \
+                                     dimmed, not recommended for everyday browsing.",
+                                )
+                                .color(pal.text_muted)
+                                .size(11.0),
                             );
 
                             // —— Appearance ——

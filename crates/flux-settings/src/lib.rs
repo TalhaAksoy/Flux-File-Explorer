@@ -26,6 +26,10 @@ pub struct Settings {
     pub theme: Theme,
     pub density: Density,
     pub show_hidden: bool,
+    /// Reveal hidden+system "protected operating system files" (Windows).
+    /// Stronger gate than `show_hidden`, mirroring Explorer's option.
+    #[serde(default)]
+    pub show_system_files: bool,
     pub confirm_permanent_delete: bool,
     /// Saved tab paths for session restore.
     pub tabs: Vec<PathBuf>,
@@ -68,6 +72,7 @@ impl Default for Settings {
             theme: Theme::System,
             density: Density::Standard,
             show_hidden: false,
+            show_system_files: false,
             confirm_permanent_delete: true,
             tabs: Vec::new(),
             bookmarks: Vec::new(),

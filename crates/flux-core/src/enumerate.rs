@@ -11,7 +11,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, mpsc};
 use std::thread::JoinHandle;
 
-use crate::entry::{DirEntry, EntryKind, is_hidden_name};
+use crate::entry::{
+    ATTR_SYSTEM, DirEntry, EntryKind, dirent_attr_bits, is_hidden, metadata_attr_bits,
+};
 use crate::snapshot::SnapshotHandle;
 
 /// Entries buffered per snapshot append / UI wakeup. Tuned by benchmarks;
@@ -205,8 +207,12 @@ fn run_scan(req: &EnumRequest, ev_tx: &mpsc::SyncSender<EnumEvent>, cur_gen: &Ar
             ),
             None => (crate::UNKNOWN_SIZE, None, false),
         };
+        // Windows: FILE_ATTRIBUTE_* bits ride along in the dirent — no
+        // per-row syscall. 0 elsewhere.
+        let attrs = dirent_attr_bits(&ent);
         batch.push(DirEntry {
-            hidden: is_hidden_name(&name),
+            hidden: is_hidden(&name, attrs),
+            system: attrs & ATTR_SYSTEM != 0,
             name,
             kind,
             size,
@@ -396,8 +402,7 @@ fn run_fill(
     let mut done_marks = vec![false; count];
     let mut done = 0usize;
     let mut cursor = 0usize;
-    let mut batch: Vec<(u32, u64, Option<std::time::SystemTime>, bool)> =
-        Vec::with_capacity(META_BATCH);
+    let mut batch: Vec<crate::snapshot::MetaFill> = Vec::with_capacity(META_BATCH);
 
     while done < count {
         if !is_current() {
@@ -438,16 +443,19 @@ fn run_fill(
         for (slot, (name, kind)) in infos.iter().enumerate() {
             let i = idxs[slot];
             if let Ok(md) = std::fs::symlink_metadata(path.join(name)) {
-                batch.push((
-                    i,
-                    if *kind == EntryKind::File {
+                let attrs = metadata_attr_bits(&md);
+                batch.push(crate::snapshot::MetaFill {
+                    idx: i,
+                    size: if *kind == EntryKind::File {
                         md.len()
                     } else {
                         crate::UNKNOWN_SIZE
                     },
-                    md.modified().ok(),
-                    md.permissions().readonly(),
-                ));
+                    mtime: md.modified().ok(),
+                    readonly: md.permissions().readonly(),
+                    hidden: is_hidden(name, attrs),
+                    system: attrs & ATTR_SYSTEM != 0,
+                });
             }
             done_marks[i as usize] = true;
             done += 1;

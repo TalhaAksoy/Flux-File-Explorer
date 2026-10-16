@@ -960,6 +960,14 @@ impl eframe::App for FluxApp {
         dialogs::show(self, &ctx);
         self.palette(&ctx);
 
+        // Flush debounced settings writes (column resizes etc.). While a
+        // write is pending, wake once after the quiet window — otherwise
+        // an idle UI would never get the frame that flushes.
+        self.flush_settings_debounce();
+        if let Some(t) = self.settings_dirty_at {
+            ctx.request_repaint_after(Duration::from_millis(1250).saturating_sub(t.elapsed()));
+        }
+
         // Slow tick while anything streams so spinners/progress animate.
         let loading = self
             .current_tab()

@@ -23,6 +23,10 @@ pub struct DirEntry {
     pub mtime: Option<SystemTime>,
     pub readonly: bool,
     pub hidden: bool,
+    /// Windows `FILE_ATTRIBUTE_SYSTEM`; always false elsewhere. Combined
+    /// with `hidden` it marks "protected operating system files", which
+    /// Explorer hides behind a separate, stronger toggle.
+    pub system: bool,
 }
 
 impl DirEntry {
@@ -51,6 +55,23 @@ impl DirEntry {
             return true;
         }
         contains_case_insensitive(&self.name.to_string_lossy(), f)
+    }
+
+    /// Explorer-style visibility: ordinary hidden files are governed by
+    /// `show_hidden`, but hidden+system entries ("protected operating
+    /// system files") only surface when `show_system` is set — matching
+    /// Explorer's separate "hide protected operating system files" option.
+    /// Non-Windows entries never carry `system`, so this reduces to the
+    /// classic `show_hidden || !hidden` rule.
+    pub fn visible(&self, show_hidden: bool, show_system: bool) -> bool {
+        if !self.hidden {
+            return true;
+        }
+        if self.system {
+            show_system
+        } else {
+            show_hidden
+        }
     }
 }
 
@@ -82,4 +103,45 @@ pub fn contains_case_insensitive(hay: &str, needle: &str) -> bool {
 /// Unix: leading '.'. Windows hidden attribute is detected via metadata.
 pub fn is_hidden_name(name: &OsStr) -> bool {
     name.as_encoded_bytes().first() == Some(&b'.')
+}
+
+/// `FILE_ATTRIBUTE_HIDDEN` / `FILE_ATTRIBUTE_SYSTEM` (windows-sys values,
+/// duplicated so non-Windows builds need no windows deps).
+pub const ATTR_HIDDEN: u32 = 0x2;
+pub const ATTR_SYSTEM: u32 = 0x4;
+
+/// Hidden = leading-dot name OR `FILE_ATTRIBUTE_HIDDEN`.
+pub fn is_hidden(name: &OsStr, attr_bits: u32) -> bool {
+    is_hidden_name(name) || attr_bits & ATTR_HIDDEN != 0
+}
+
+/// Platform attribute bits for a `std::fs::DirEntry`. On Windows
+/// `DirEntry::metadata` returns data `FindNextFile` already fetched — no
+/// extra syscall per row. Always 0 on other platforms.
+pub fn dirent_attr_bits(ent: &std::fs::DirEntry) -> u32 {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        ent.metadata().map(|m| m.file_attributes()).unwrap_or(0)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = ent;
+        0
+    }
+}
+
+/// Same attribute bits from a full metadata result (used by the deferred
+/// metadata worker, which stats anyway).
+pub fn metadata_attr_bits(md: &std::fs::Metadata) -> u32 {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        md.file_attributes()
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = md;
+        0
+    }
 }

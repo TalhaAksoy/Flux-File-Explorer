@@ -55,6 +55,7 @@ impl ComputeEngine {
                             s.sort,
                             s.filter.clone(),
                             s.show_hidden,
+                            s.show_system,
                             s.version(),
                         )),
                         _ => None,
@@ -63,8 +64,14 @@ impl ComputeEngine {
                     //    expensive part and it must not hold a write lock
                     //    that blocks UI snapshot reads.
                     let ok = match inputs {
-                        Some((entries, sort, filter, show_hidden, version)) => {
-                            let view = build_view(&entries, &sort, filter.as_deref(), show_hidden);
+                        Some((entries, sort, filter, show_hidden, show_system, version)) => {
+                            let view = build_view(
+                                &entries,
+                                &sort,
+                                filter.as_deref(),
+                                show_hidden,
+                                show_system,
+                            );
                             // 3. Apply under a short WRITE lock, re-checking
                             //    every input that could have changed while we
                             //    computed (entries appended → version bumps;
@@ -75,7 +82,8 @@ impl ComputeEngine {
                                         && s.version() == version
                                         && s.sort == sort
                                         && s.filter == filter
-                                        && s.show_hidden == show_hidden =>
+                                        && s.show_hidden == show_hidden
+                                        && s.show_system == show_system =>
                                 {
                                     s.set_view(view);
                                     true
