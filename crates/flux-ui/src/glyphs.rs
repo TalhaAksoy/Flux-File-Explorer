@@ -125,7 +125,7 @@ pub fn icon_row(
 ) -> egui::Response {
     let h = ui.spacing().interact_size.y;
     let w = ui.available_width();
-    let (rect, resp) = ui.allocate_exact_size(Vec2::new(w, h), egui::Sense::click());
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(w, h), egui::Sense::click_and_drag());
     let pal = crate::theme::Palette::of(&ui.style().visuals);
     let hovered = resp.hovered() && !selected;
     // Pill insets from the panel edge — the fill breathes around the

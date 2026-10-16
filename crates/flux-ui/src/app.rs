@@ -294,6 +294,24 @@ pub struct FluxApp {
     pub reported_ops: rustc_hash::FxHashSet<u64>,
     /// Whether the filesystem watcher has been handed a wake callback yet.
     pub wake_installed: bool,
+    /// In-flight sidebar reorder drag — the dragged row's path plus the
+    /// section it came from (kept separate from `dragging`, which is
+    /// file-row drags into directories).
+    pub sidebar_drag: Option<SidebarDrag>,
+}
+
+/// Which sidebar section a reorder drag belongs to — a path that exists in
+/// both Places and Bookmarks must only reorder the section it was grabbed
+/// in, so we remember the origin instead of re-deriving membership.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum SidebarSection {
+    Places,
+    Bookmarks,
+}
+
+pub struct SidebarDrag {
+    pub path: PathBuf,
+    pub section: SidebarSection,
 }
 
 /// An in-flight drag of file rows.
@@ -385,6 +403,7 @@ impl FluxApp {
             last_meta_repaint: Instant::now(),
             reported_ops: rustc_hash::FxHashSet::default(),
             wake_installed: false,
+            sidebar_drag: None,
         }
     }
 
@@ -831,6 +850,64 @@ impl FluxApp {
 
     pub fn unpin_from_sidebar(&mut self, path: &std::path::Path) {
         self.settings.bookmarks.retain(|b| b != path);
+        let _ = flux_settings::save(&self.settings);
+    }
+
+    /// Move bookmark `path` so it sits at `insert_at` in the current order.
+    /// `insert_at` is an insert-BEFORE index into the pre-move list.
+    pub fn move_bookmark(&mut self, path: &std::path::Path, insert_at: usize) {
+        let Some(from) = self.settings.bookmarks.iter().position(|b| b == path) else {
+            return;
+        };
+        let last = self.settings.bookmarks.len() - 1;
+        let at = if insert_at > from {
+            insert_at - 1
+        } else {
+            insert_at
+        }
+        .min(last);
+        if at == from {
+            return; // dropped onto itself — nothing to persist
+        }
+        let item = self.settings.bookmarks.remove(from);
+        self.settings.bookmarks.insert(at, item);
+        let _ = flux_settings::save(&self.settings);
+    }
+
+    /// Places rows in display order — `settings.places_order` positions
+    /// win; dirs absent from it keep their default relative order.
+    pub fn ordered_places(&self) -> Vec<(&'static str, PathBuf)> {
+        let mut v = self.known.clone();
+        v.sort_by_key(|(_, p)| {
+            self.settings
+                .places_order
+                .iter()
+                .position(|x| x == p)
+                .unwrap_or(usize::MAX)
+        });
+        v
+    }
+
+    /// Persist a user-defined Places order — the full visible order with
+    /// `path` moved to `insert_at`.
+    pub fn move_place(&mut self, path: &std::path::Path, insert_at: usize) {
+        let mut order: Vec<PathBuf> = self.ordered_places().into_iter().map(|(_, p)| p).collect();
+        let Some(from) = order.iter().position(|p| p == path) else {
+            return;
+        };
+        let last = order.len() - 1;
+        let at = if insert_at > from {
+            insert_at - 1
+        } else {
+            insert_at
+        }
+        .min(last);
+        if at == from {
+            return;
+        }
+        let item = order.remove(from);
+        order.insert(at, item);
+        self.settings.places_order = order;
         let _ = flux_settings::save(&self.settings);
     }
 

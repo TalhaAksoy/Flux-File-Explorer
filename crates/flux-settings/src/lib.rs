@@ -30,6 +30,10 @@ pub struct Settings {
     /// Saved tab paths for session restore.
     pub tabs: Vec<PathBuf>,
     pub bookmarks: Vec<PathBuf>,
+    /// User-defined ordering for the Places section (paths in display
+    /// order). Entries missing from this list keep their default position.
+    #[serde(default)]
+    pub places_order: Vec<PathBuf>,
     pub recents: Vec<PathBuf>,
     pub sidebar_width: f32,
     /// Column widths [name, size, modified, type] in points.
@@ -49,6 +53,7 @@ impl Default for Settings {
             confirm_permanent_delete: true,
             tabs: Vec::new(),
             bookmarks: Vec::new(),
+            places_order: Vec::new(),
             recents: Vec::new(),
             sidebar_width: 190.0,
             column_widths: [340.0, 90.0, 160.0, 90.0],

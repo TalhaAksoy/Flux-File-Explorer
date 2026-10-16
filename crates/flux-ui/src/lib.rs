@@ -60,6 +60,8 @@ impl FluxApp {
                 self.dialog = Dialog::None;
             } else if self.dragging.is_some() {
                 self.dragging = None;
+            } else if self.sidebar_drag.is_some() {
+                self.sidebar_drag = None;
             } else if !self.filter_text.is_empty() {
                 self.filter_text.clear();
                 self.set_filter(String::new());

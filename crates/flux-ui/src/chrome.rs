@@ -59,6 +59,41 @@ fn drop_target(
     }
 }
 
+/// While a sidebar row is being reordered, check whether `resp` is the
+/// hovered row: paint the accent insertion line at the nearer edge and
+/// return the index the dragged row should be moved to. `member` gates it
+/// to the section the dragged item actually belongs to.
+fn reorder_zone(
+    app: &FluxApp,
+    ui: &egui::Ui,
+    resp: &egui::Response,
+    row_idx: usize,
+    member: bool,
+) -> Option<usize> {
+    if app.sidebar_drag.is_none() || !member || !resp.contains_pointer() {
+        return None;
+    }
+    let y = ui
+        .input(|i| i.pointer.latest_pos())
+        .map(|p| p.y)
+        .unwrap_or_default();
+    let top = y < resp.rect.center().y;
+    let edge = if top {
+        resp.rect.top()
+    } else {
+        resp.rect.bottom()
+    };
+    ui.painter().rect_filled(
+        egui::Rect::from_min_max(
+            egui::pos2(resp.rect.left() + 4.0, edge - 1.0),
+            egui::pos2(resp.rect.right() - 4.0, edge + 1.0),
+        ),
+        1.0,
+        ui.visuals().selection.stroke.color,
+    );
+    Some(if top { row_idx } else { row_idx + 1 })
+}
+
 /// Top toolbar: nav buttons, breadcrumb / editable path, filter field.
 pub fn toolbar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
     // Toolbar chrome runs larger than the file list — primary navigation
@@ -255,7 +290,9 @@ pub fn sidebar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
         .id_salt("sidebar")
         .show(ui, |ui| {
             section(ui, "Places");
-            for (label, path) in app.known.clone() {
+            let mut places_insert: Option<usize> = None;
+            let places = app.ordered_places();
+            for (i, (label, path)) in places.into_iter().enumerate() {
                 let resp = glyphs::icon_row(ui, folder_icon, label, path == current);
                 resp.context_menu(|ui| {
                     if ui.button("Open").clicked() {
@@ -268,6 +305,22 @@ pub fn sidebar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
                     }
                 });
                 drop_target(app, ui, &resp, &path, act);
+                if app.dragging.is_none()
+                    && app.sidebar_drag.is_none()
+                    && resp.drag_started_by(egui::PointerButton::Primary)
+                {
+                    app.sidebar_drag = Some(crate::app::SidebarDrag {
+                        path: path.clone(),
+                        section: crate::app::SidebarSection::Places,
+                    });
+                }
+                let member = app
+                    .sidebar_drag
+                    .as_ref()
+                    .is_some_and(|d| d.section == crate::app::SidebarSection::Places);
+                if let Some(idx) = reorder_zone(app, ui, &resp, i, member) {
+                    places_insert = Some(idx);
+                }
                 if resp.middle_clicked() {
                     act.new_tab_at = Some(path.clone());
                 }
@@ -279,6 +332,7 @@ pub fn sidebar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
             // drop zone for pinning dragged folders, and the header carries
             // the "Add Folder…" context action.
             let mut add_bookmark = false;
+            let mut bm_insert: Option<usize> = None;
             ui.add_space(8.0);
             let hdr_lbl = ui.label(
                 egui::RichText::new("Bookmarks")
@@ -359,7 +413,7 @@ pub fn sidebar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
                 }
             } else {
                 let mut unpin: Option<PathBuf> = None;
-                for p in app.settings.bookmarks.clone() {
+                for (i, p) in app.settings.bookmarks.clone().into_iter().enumerate() {
                     let label = p
                         .file_name()
                         .map(|n| n.to_string_lossy().into_owned())
@@ -382,6 +436,22 @@ pub fn sidebar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
                         }
                     });
                     drop_target(app, ui, &resp, &p, act);
+                    if app.dragging.is_none()
+                        && app.sidebar_drag.is_none()
+                        && resp.drag_started_by(egui::PointerButton::Primary)
+                    {
+                        app.sidebar_drag = Some(crate::app::SidebarDrag {
+                            path: p.clone(),
+                            section: crate::app::SidebarSection::Bookmarks,
+                        });
+                    }
+                    let member = app
+                        .sidebar_drag
+                        .as_ref()
+                        .is_some_and(|d| d.section == crate::app::SidebarSection::Bookmarks);
+                    if let Some(idx) = reorder_zone(app, ui, &resp, i, member) {
+                        bm_insert = Some(idx);
+                    }
                     if resp.middle_clicked() {
                         act.new_tab_at = Some(p.clone());
                     }
@@ -422,6 +492,17 @@ pub fn sidebar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
                         ui.visuals().selection.stroke.color,
                     );
                 }
+                // During a bookmark reorder the add-row doubles as the
+                // "append at end" target — it sits at the list bottom.
+                let member = app
+                    .sidebar_drag
+                    .as_ref()
+                    .is_some_and(|d| d.section == crate::app::SidebarSection::Bookmarks);
+                if let Some(idx) =
+                    reorder_zone(app, ui, &resp, app.settings.bookmarks.len(), member)
+                {
+                    bm_insert = Some(idx);
+                }
             }
             if add_bookmark {
                 match flux_platform::pick_folder() {
@@ -447,6 +528,21 @@ pub fn sidebar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
                 }
                 if resp.clicked() {
                     act.navigate = Some(v.mount);
+                }
+            }
+            // Commit an in-flight sidebar reorder on primary release.
+            // Escape cancels via the global cascade in `handle_keys` —
+            // consume_key removes the event before this frame reaches us.
+            if let Some(d) = app.sidebar_drag.as_ref() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+                if ui.input(|i| i.pointer.primary_released()) {
+                    let d_path = d.path.clone();
+                    app.sidebar_drag = None;
+                    if let Some(idx) = bm_insert {
+                        app.move_bookmark(&d_path, idx);
+                    } else if let Some(idx) = places_insert {
+                        app.move_place(&d_path, idx);
+                    }
                 }
             }
         });
