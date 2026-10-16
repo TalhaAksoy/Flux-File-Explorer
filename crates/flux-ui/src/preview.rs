@@ -516,10 +516,7 @@ fn exif_fields(path: &Path) -> Vec<(&'static str, String)> {
         }
     };
     // f/N aperture — Rational rendered as a real number.
-    if let Some(v) = x
-        .get_field(Tag::FNumber, In::PRIMARY)
-        .and_then(&rat_f64)
-    {
+    if let Some(v) = x.get_field(Tag::FNumber, In::PRIMARY).and_then(&rat_f64) {
         out.push(("Aperture", format!("f/{v:.1}")));
     }
     // Shutter: 1/N for sub-second, N.N s otherwise.
