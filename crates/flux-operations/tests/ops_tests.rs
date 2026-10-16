@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use flux_operations::conflict::{
     ConflictAction, ConflictPolicy, keep_both_path, validate_filename,
 };
-use flux_operations::copy::{CopyCtx, ItemOutcome, copy_tree, discover};
+use flux_operations::copy::{CopyCtx, copy_tree, discover};
 use flux_operations::progress::{OpProgress, OpState};
 use flux_operations::rename::{RenameRule, execute_renames, plan_renames};
 use flux_operations::{OpEngine, OpEvent, OpKind, RenameStatus};
@@ -563,7 +563,7 @@ fn copy_symlink_overwrite_replaces_existing_dest() {
     let cancel = AtomicBool::new(false);
     let ctx = noop_ctx(&progress, &cancel); // resolver answers Overwrite
     let r = copy_tree(&dir.join("link"), &destdir.join("link"), &ctx).unwrap();
-    assert_eq!(r, ItemOutcome::Done);
+    assert_eq!(r, flux_operations::copy::ItemOutcome::Done);
     let dst = destdir.join("link");
     let md = std::fs::symlink_metadata(&dst).unwrap();
     assert!(md.file_type().is_symlink(), "dest should be a symlink now");
@@ -586,7 +586,7 @@ fn copy_symlink_does_not_follow_link() {
     let cancel = AtomicBool::new(false);
     let ctx = noop_ctx(&progress, &cancel);
     let r = copy_tree(&dir.join("alias"), &dst, &ctx).unwrap();
-    assert_eq!(r, ItemOutcome::Done);
+    assert_eq!(r, flux_operations::copy::ItemOutcome::Done);
     assert!(
         std::fs::symlink_metadata(&dst)
             .unwrap()

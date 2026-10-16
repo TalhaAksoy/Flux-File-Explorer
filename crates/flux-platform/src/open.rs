@@ -458,6 +458,7 @@ fn expand_exec(exec: &str) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(all(unix, not(target_os = "macos")))]
     use super::*;
 
     #[cfg(all(unix, not(target_os = "macos")))]
