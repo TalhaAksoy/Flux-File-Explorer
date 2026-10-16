@@ -519,18 +519,25 @@ pub fn show(app: &mut FluxApp, ctx: &egui::Context) {
                                     } else {
                                         egui::FontId::proportional(size)
                                     };
-                                    let mut rt = egui::RichText::new(text)
-                                        .font(font)
-                                        .color(pal.text_primary);
-                                    if strong {
-                                        rt = rt.strong();
-                                    }
-                                    ui.label(rt);
-                                    ui.label(
-                                        egui::RichText::new(format!("{size}pt"))
-                                            .color(pal.text_muted)
-                                            .size(10.5),
+                                    // Sample + size readout in one galley,
+                                    // truncated — wide fonts can't spill
+                                    // past the card edge.
+                                    let _ = strong; // egui has no real bold
+                                    let mut job = egui::text::LayoutJob::default();
+                                    job.append(
+                                        text,
+                                        0.0,
+                                        egui::TextFormat::simple(font, pal.text_primary),
                                     );
+                                    job.append(
+                                        &format!("  {size}pt"),
+                                        0.0,
+                                        egui::TextFormat::simple(
+                                            egui::FontId::proportional(10.5),
+                                            pal.text_muted,
+                                        ),
+                                    );
+                                    ui.add(egui::Label::new(job).truncate());
                                 });
                             };
                             sample(ui, "Toolbar", 15.0, false, false, "Flux Files — Pictures");
@@ -603,14 +610,14 @@ pub fn show(app: &mut FluxApp, ctx: &egui::Context) {
                                     },
                                 );
                             });
-
-                            // —— Save —— (changes apply live; both buttons close)
-                            let (done, cancel) = footer(ui, "Done", true);
-                            if done || cancel {
-                                app.save_settings();
-                                close = true;
-                            }
                         });
+                    // Footer stays pinned — outside the scroll area so it
+                    // never scrolls/clips off at small window heights.
+                    let (done, cancel) = footer(ui, "Done", true);
+                    if done || cancel {
+                        app.save_settings();
+                        close = true;
+                    }
                 });
         }
         Dialog::About => {
