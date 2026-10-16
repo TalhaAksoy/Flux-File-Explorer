@@ -195,13 +195,15 @@ pub type IconCacheHandle = std::rc::Rc<IconCache>;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::Path;
 
     #[test]
     fn icon_roundtrip_via_worker() {
         let c = IconCache::new();
+        // Needs a path that exists on every OS — /tmp isn't one on Windows,
+        // and SHGetFileInfo yields no icon for nonexistent paths.
+        let dir = std::env::temp_dir();
         // First call queues the fetch.
-        assert!(c.texture(&IconKey::Folder, Path::new("/tmp")).is_none());
+        assert!(c.texture(&IconKey::Folder, &dir).is_none());
         // Wait for the worker + pump results into textures.
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
         let ctx = egui::Context::default();
@@ -213,12 +215,12 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
         #[cfg(any(target_os = "macos", target_os = "windows"))]
-        assert!(c.texture(&IconKey::Folder, Path::new("/tmp")).is_some());
+        assert!(c.texture(&IconKey::Folder, &dir).is_some());
         // No OS icon provider here: the negative result must be cached —
         // a re-lookup must return None without queueing another fetch.
         #[cfg(not(any(target_os = "macos", target_os = "windows")))]
         {
-            assert!(c.texture(&IconKey::Folder, Path::new("/tmp")).is_none());
+            assert!(c.texture(&IconKey::Folder, &dir).is_none());
             assert!(c.in_flight.lock().unwrap().is_empty());
         }
     }
