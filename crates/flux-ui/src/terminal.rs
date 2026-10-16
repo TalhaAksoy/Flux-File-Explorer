@@ -426,12 +426,20 @@ impl FluxApp {
             .ctx()
             .fonts_mut(|f| (f.glyph_width(&mono, 'M').max(4.0), f.row_height(&mono)));
 
-        // Header: prompt glyph + cwd, spacer, actions.
+        // Header: painted prompt glyph + cwd, spacer, actions. The bundled
+        // font lacks ❯/⧉/✕ characters — everything is a drawn Glyph.
+        ui.spacing_mut().interact_size.y = 24.0;
         let mut close = false;
         let mut external = false;
         let mut cd = false;
         ui.horizontal(|ui| {
-            ui.label(egui::RichText::new("❯").color(pal.accent).size(12.0));
+            let (grect, _) = ui.allocate_exact_size(egui::Vec2::splat(14.0), egui::Sense::hover());
+            crate::glyphs::paint_glyph(
+                ui.painter(),
+                grect,
+                crate::glyphs::Glyph::Terminal,
+                pal.accent,
+            );
             ui.label(
                 egui::RichText::new(term.cwd.display().to_string())
                     .color(pal.text_muted)
@@ -445,16 +453,22 @@ impl FluxApp {
                 );
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                close = ui
-                    .button(egui::RichText::new("✕").size(11.0))
-                    .on_hover_text("Close terminal")
-                    .clicked();
-                external = ui
-                    .button(egui::RichText::new("⧉").size(11.0))
-                    .on_hover_text("Open in external Terminal")
-                    .clicked();
+                close = crate::glyphs::icon_button(
+                    ui,
+                    crate::glyphs::Glyph::Close,
+                    "Close terminal",
+                    true,
+                )
+                .clicked();
+                external = crate::glyphs::icon_button(
+                    ui,
+                    crate::glyphs::Glyph::External,
+                    "Open in external Terminal",
+                    true,
+                )
+                .clicked();
                 cd = ui
-                    .button(egui::RichText::new("↓ cwd").size(11.0))
+                    .button(egui::RichText::new("↓ cwd").size(11.5))
                     .on_hover_text("cd to the current folder")
                     .clicked();
             });
@@ -665,5 +679,10 @@ impl FluxApp {
                 );
             }
         }
+
+        // Claim the remaining space — required for Panel::resizable to
+        // keep a dragged height; without it the panel's content-min is
+        // just the header and the drag snaps back on release.
+        ui.take_available_space();
     }
 }

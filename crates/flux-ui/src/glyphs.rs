@@ -17,6 +17,8 @@ pub enum Glyph {
     Disk,
     /// Shell prompt (❯_) — embedded terminal.
     Terminal,
+    /// Open in external app (box with arrow exiting NE).
+    External,
 }
 
 /// Draw `g` centered inside `rect` with the given color.
@@ -126,6 +128,17 @@ pub fn paint_glyph(p: &egui::Painter, rect: Rect, g: Glyph, color: Color32) {
                 ],
                 st,
             );
+        }
+        Glyph::External => {
+            // Rounded box, lower-left — with an arrow leaving its top-right.
+            let b =
+                Rect::from_center_size(c + egui::vec2(-r * 0.15, r * 0.15), Vec2::splat(r * 1.15));
+            p.rect_stroke(b, CornerRadius::same(2), st, StrokeKind::Inside);
+            let to = Pos2::new(c.x + r * 0.72, c.y - r * 0.72);
+            p.line_segment([Pos2::new(c.x - r * 0.05, c.y + r * 0.05), to], st);
+            for d in [egui::vec2(-0.45, 0.0), egui::vec2(0.0, 0.45)] {
+                p.line_segment([to, to + d * r], st);
+            }
         }
     }
 }

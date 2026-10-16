@@ -656,6 +656,10 @@ pub fn tab_bar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
 
 /// Bottom status bar: counts, selection size, free space, op progress.
 pub fn status_bar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
+    {
+        let st = ui.style_mut();
+        st.spacing.interact_size.y = 26.0;
+    }
     let tab = app.current_tab();
     let (view_len, total, sel_count, sel_bytes, loading) = {
         let s = tab.snap.read().unwrap();

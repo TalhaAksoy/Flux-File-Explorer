@@ -542,7 +542,7 @@ impl eframe::App for FluxApp {
             .inner_margin(egui::Margin::symmetric(10, 2));
         let status_frame = egui::Frame::default()
             .fill(theme::chrome_fill(dark))
-            .inner_margin(egui::Margin::symmetric(10, 4));
+            .inner_margin(egui::Margin::symmetric(10, 5));
         let side_frame = egui::Frame::default()
             .fill(theme::sidebar_fill(dark))
             .inner_margin(egui::Margin::symmetric(8, 6));
