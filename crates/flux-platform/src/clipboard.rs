@@ -464,6 +464,9 @@ mod imp {
 
 #[cfg(test)]
 mod tests {
+    // Every test below is unix-gated; on Windows the glob import would be
+    // unused and trip -D warnings.
+    #[cfg(unix)]
     use super::*;
 
     /// Round-trip on the real OS clipboard. Skips silently in headless

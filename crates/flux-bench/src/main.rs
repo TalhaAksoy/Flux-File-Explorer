@@ -96,10 +96,8 @@ fn run(dir: &Path) -> ExitCode {
         let mut finished = false;
         for ev in engine.drain_events() {
             match ev {
-                EnumEvent::Batch { gen_id, .. } if gen_id == g => {
-                    if first_batch.is_none() {
-                        first_batch = Some(t0.elapsed());
-                    }
+                EnumEvent::Batch { gen_id, .. } if gen_id == g && first_batch.is_none() => {
+                    first_batch = Some(t0.elapsed());
                 }
                 EnumEvent::Finished { gen_id, total: t } if gen_id == g => {
                     total = t;
