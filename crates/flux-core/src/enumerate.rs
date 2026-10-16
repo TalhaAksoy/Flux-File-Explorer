@@ -320,9 +320,12 @@ impl MetaEngine {
     }
 
     /// Fill metadata for every entry of `snap` (generation `gen_id`).
-    /// Called by the UI when enumeration finishes.
+    /// Called by the UI when enumeration finishes. Resets the priority
+    /// range — it belongs to the previous directory's viewport until the
+    /// new view reports one.
     pub fn fill(&self, snap: &SnapshotHandle, gen_id: u64) {
         let job = self.cur_gen.fetch_add(1, Ordering::SeqCst) + 1;
+        self.priority.store(0, Ordering::Relaxed);
         let _ = self.req_tx.send(MetaRequest {
             snap: snap.clone(),
             gen_id,

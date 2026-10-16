@@ -17,8 +17,9 @@ use flux_settings::Settings;
 use crate::pane::Tab;
 use crate::theme::Density;
 
-/// Internal file clipboard. Interop with the OS clipboard for *files* is a
-/// later milestone; we also mirror plain-text paths for convenience.
+/// Internal file clipboard. Writes are also mirrored to the OS clipboard
+/// (`flux_platform::clipboard`) so files copy between Flux and the native
+/// file manager; plain-text paths are mirrored for convenience too.
 #[derive(Default)]
 pub struct Clipboard {
     pub items: Vec<PathBuf>,
@@ -270,6 +271,10 @@ pub struct FluxApp {
     pub status_msg: Option<(String, Instant)>,
     /// Paths text to hand to the OS clipboard on the next frame.
     pub pending_copy_text: Option<String>,
+    /// File payload the OS clipboard held when a menu last opened —
+    /// refreshed on context-menu open and consulted when the internal
+    /// clipboard is empty (files copied in Finder/Explorer/a Linux FM).
+    pub ext_clipboard: Option<flux_platform::clipboard::ClipPayload>,
 
     /// Native icon cache (background worker; glyph fallback until ready).
     pub icons: crate::icon_cache::IconCacheHandle,
@@ -282,6 +287,9 @@ pub struct FluxApp {
     /// because snapshots carry their own generation.
     pub last_watch_hit: Option<Instant>,
     pub last_gc: Instant,
+    /// Last time a MetaBatch triggered a repaint — progressive size/date
+    /// updates are coalesced to ~30 fps instead of one frame per batch.
+    pub last_meta_repaint: Instant,
     /// Op ids whose failure was already toasted — report once, not per frame.
     pub reported_ops: rustc_hash::FxHashSet<u64>,
     /// Whether the filesystem watcher has been handed a wake callback yet.
@@ -369,10 +377,12 @@ impl FluxApp {
             free_space: None,
             status_msg: None,
             pending_copy_text: None,
+            ext_clipboard: None,
             icons: std::rc::Rc::new(crate::icon_cache::IconCache::new()),
             dragging: None,
             last_watch_hit: None,
             last_gc: Instant::now(),
+            last_meta_repaint: Instant::now(),
             reported_ops: rustc_hash::FxHashSet::default(),
             wake_installed: false,
         }
@@ -647,12 +657,23 @@ impl FluxApp {
     pub fn submit_copy(&mut self, dest: PathBuf) {
         // Copy once → paste many times: only a Cut empties the clipboard
         // after the operation is submitted (Explorer semantics).
-        let cut = self.clipboard.cut;
-        let items = if cut {
+        let mut cut = self.clipboard.cut;
+        let mut items = if cut {
             std::mem::take(&mut self.clipboard.items)
         } else {
             self.clipboard.items.clone()
         };
+        if items.is_empty() {
+            // Internal clipboard empty — pull files the user copied in the
+            // OS file manager (Finder/Explorer/Dolphin…). Read the live
+            // clipboard first; the menu-open snapshot is only a fallback
+            // (it can be stale if the OS clipboard changed since).
+            let ext = flux_platform::clipboard::read_files().or_else(|| self.ext_clipboard.take());
+            if let Some(pl) = ext {
+                items = pl.paths;
+                cut = pl.cut;
+            }
+        }
         if items.is_empty() {
             return;
         }
@@ -851,7 +872,19 @@ impl FluxApp {
         // metadata so the final order is exact.
         for ev in self.meta_engine.drain_events().collect::<Vec<_>>() {
             match ev {
-                MetaEvent::Batch { .. } => ctx.request_repaint(),
+                MetaEvent::Batch { .. } => {
+                    // A fast disk can stream ~100 batches/sec for a huge
+                    // dir — coalesce repaints to ~30 fps; the final
+                    // Finished event always repaints regardless.
+                    const FRAME: Duration = Duration::from_millis(33);
+                    let elapsed = self.last_meta_repaint.elapsed();
+                    if elapsed >= FRAME {
+                        self.last_meta_repaint = Instant::now();
+                        ctx.request_repaint();
+                    } else {
+                        ctx.request_repaint_after(FRAME - elapsed);
+                    }
+                }
                 MetaEvent::Finished { gen_id } => {
                     for tab in &mut self.tabs {
                         if tab.gen_id == gen_id

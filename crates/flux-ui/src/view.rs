@@ -28,6 +28,11 @@ pub struct RowAction {
     pub drag_start: Option<usize>,
     /// While dragging: the hovered directory row (drop target).
     pub drop_row: Option<usize>,
+    /// Min/max entry index of the rows actually rendered this frame —
+    /// fed to `MetaEngine::set_priority` so background statting covers
+    /// the viewport first. A superset range is fine: the engine still
+    /// fills sequentially for anything outside it.
+    pub visible_range: Option<(EntryIdx, EntryIdx)>,
 }
 
 /// 16-px-ish painted glyphs: folder silhouette, document with folded corner,
@@ -221,6 +226,8 @@ pub fn file_table(app: &mut FluxApp, ui: &mut egui::Ui) -> RowAction {
         }
     };
 
+    let mut vis_min = EntryIdx::MAX;
+    let mut vis_max = 0;
     builder.header(22.0, header).body(|body| {
         body.rows(row_h, view_len, |mut row| {
             let row_idx = row.index();
@@ -244,6 +251,8 @@ pub fn file_table(app: &mut FluxApp, ui: &mut egui::Ui) -> RowAction {
                 )
             };
 
+            vis_min = vis_min.min(idx);
+            vis_max = vis_max.max(idx);
             let selected = sel.contains(idx);
             row.set_selected(selected);
 
@@ -324,6 +333,9 @@ pub fn file_table(app: &mut FluxApp, ui: &mut egui::Ui) -> RowAction {
         });
     });
 
+    if vis_min <= vis_max {
+        action.visible_range = Some((vis_min, vis_max));
+    }
     let _ = focus_row;
     action
 }
