@@ -351,6 +351,42 @@ fn resolve_dest(src: &Path, dst: &Path, c: &CopyCtx<'_>) -> Option<(PathBuf, boo
     }
 }
 
+/// `clonefile(2)` — APFS copy-on-write clone. The destination must not
+/// exist, so the clone itself claims a `.fluxpart-*` name (same scheme as
+/// `create_staging`). Returns the claimed path; `None` means cloning is
+/// unavailable here and the caller should stage a real byte copy.
+// Raw FFI is unavoidable: neither std nor libc wraps clonefile.
+#[cfg(target_os = "macos")]
+#[allow(unsafe_code)]
+fn clone_file(src: &Path, dst: &Path, tag: u64) -> Option<PathBuf> {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+    unsafe extern "C" {
+        fn clonefile(src: *const std::ffi::c_char, dst: *const std::ffi::c_char, flags: i32)
+        -> i32;
+    }
+    let csrc = CString::new(src.as_os_str().as_bytes()).ok()?;
+    let base = dst.file_name()?.to_os_string();
+    for n in 0..100u32 {
+        let mut name = base.clone();
+        name.push(format!(".fluxpart-{tag}-c{n}"));
+        let tmp = dst.with_file_name(name);
+        let Ok(cdst) = CString::new(tmp.as_os_str().as_bytes()) else {
+            continue;
+        };
+        // SAFETY: both args are valid NUL-terminated path strings.
+        if unsafe { clonefile(csrc.as_ptr(), cdst.as_ptr(), 0) } == 0 {
+            return Some(tmp);
+        }
+        // Name collision → try the next suffix; anything else (ENOTSUP on
+        // non-APFS, EXDEV, EPERM, ENOENT) means no clone is possible.
+        if std::io::Error::last_os_error().kind() != std::io::ErrorKind::AlreadyExists {
+            return None;
+        }
+    }
+    None
+}
+
 /// Copy a single file `src` to `dst` (final path). Handles conflict
 /// resolution, staging, verification metadata.
 pub fn copy_file(src: &Path, dst: &Path, c: &CopyCtx<'_>) -> std::io::Result<ItemOutcome> {
@@ -362,34 +398,57 @@ pub fn copy_file(src: &Path, dst: &Path, c: &CopyCtx<'_>) -> std::io::Result<Ite
         });
     };
     let src_len = fs::symlink_metadata(src).map(|m| m.len()).unwrap_or(0);
-    let (tmp, tmp_file) = create_staging(&final_dst, c.tag)?;
-    let res = if src_len <= SMALL_FILE_FAST_PATH {
-        // We exclusively claimed `tmp`, so overwriting our own empty file
-        // with the kernel-side copy is safe.
-        drop(tmp_file);
-        fs::copy(src, &tmp).inspect(|&n| {
-            set_state(c, |p| p.done_bytes += n);
-        })
-    } else {
-        copy_file_chunks(src, tmp_file, c)
-    };
-    let n = match res {
-        Ok(n) => n,
-        Err(e) => {
-            let _ = fs::remove_file(&tmp);
+    // APFS clonefile(2): a copy-on-write, metadata-only clone — near-instant
+    // for any size. It clones into a claimed `.fluxpart-*` name and shares
+    // the normal commit path, so atomicity is unchanged. Any failure
+    // (non-APFS volume, cross-device, EPERM) falls back to a byte copy.
+    #[cfg(target_os = "macos")]
+    let cloned = clone_file(src, &final_dst, c.tag);
+    #[cfg(not(target_os = "macos"))]
+    let cloned: Option<PathBuf> = None;
+    let tmp = match cloned {
+        Some(tmp) => {
+            // The clone is atomic — but honor a cancel that landed before
+            // we commit, same contract as the byte-copy path.
             if cancelled(c) {
+                let _ = fs::remove_file(&tmp);
                 return Ok(ItemOutcome::Cancelled);
             }
-            return Err(e);
+            set_state(c, |p| p.done_bytes += src_len);
+            tmp
+        }
+        None => {
+            let (tmp, tmp_file) = create_staging(&final_dst, c.tag)?;
+            let res = if src_len <= SMALL_FILE_FAST_PATH {
+                // We exclusively claimed `tmp`, so overwriting our own
+                // empty file with the kernel-side copy is safe.
+                drop(tmp_file);
+                fs::copy(src, &tmp).inspect(|&n| {
+                    set_state(c, |p| p.done_bytes += n);
+                })
+            } else {
+                copy_file_chunks(src, tmp_file, c)
+            };
+            let n = match res {
+                Ok(n) => n,
+                Err(e) => {
+                    let _ = fs::remove_file(&tmp);
+                    if cancelled(c) {
+                        return Ok(ItemOutcome::Cancelled);
+                    }
+                    return Err(e);
+                }
+            };
+            if n != src_len {
+                let _ = fs::remove_file(&tmp);
+                return Err(std::io::Error::other(format!(
+                    "size mismatch: {} bytes written, expected {src_len}",
+                    n
+                )));
+            }
+            tmp
         }
     };
-    if n != src_len {
-        let _ = fs::remove_file(&tmp);
-        return Err(std::io::Error::other(format!(
-            "size mismatch: {} bytes written, expected {src_len}",
-            n
-        )));
-    }
     // Commit. If the destination appeared (or the KeepBoth name got
     // taken) between resolution and now, resolve again rather than
     // clobbering whatever landed there.
