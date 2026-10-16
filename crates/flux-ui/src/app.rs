@@ -434,6 +434,10 @@ pub struct FluxApp {
     /// resolved once per target (spawning xdg-mime per frame would be
     /// wasteful) and recomputed when the target path changes.
     pub open_with_cache: Option<(PathBuf, Vec<flux_platform::OpenWithApp>)>,
+    /// Row context-menu path facts (is-dir / is-zip / has-real-dir),
+    /// keyed by a hash of the item set — computed once per menu instead
+    /// of statting the filesystem every frame the menu is open.
+    pub row_menu_flags: Option<(u64, crate::dialogs::RowFlags)>,
     /// Cells-per-row the icon grid last rendered with — keyboard nav in
     /// grid/gallery mode moves Up/Down by this many entries.
     pub grid_cols: usize,
@@ -702,6 +706,7 @@ impl FluxApp {
             preview_tex: None,
             settings_dirty_at: None,
             open_with_cache: None,
+            row_menu_flags: None,
             grid_cols: 1,
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
@@ -1349,7 +1354,8 @@ impl FluxApp {
         for ev in enum_events {
             match ev {
                 EnumEvent::Finished { gen_id, .. } => {
-                    for tab in &mut self.tabs {
+                    let mut rescan_idx: Option<usize> = None;
+                    for (i, tab) in self.tabs.iter_mut().enumerate() {
                         if tab.gen_id == gen_id {
                             // Final global sort on the compute thread.
                             self.compute.rebuild(&tab.snap, gen_id);
@@ -1361,7 +1367,26 @@ impl FluxApp {
                             if let Ok(mut s) = tab.snap.write() {
                                 s.finish();
                             }
+                            // A watcher event deferred during this scan —
+                            // run exactly one trailing rescan.
+                            if std::mem::take(&mut tab.watcher_refresh_pending) {
+                                rescan_idx = Some(i);
+                            }
                         }
+                    }
+                    if let Some(i) = rescan_idx {
+                        // Mirror refresh(): keep selection across the rescan.
+                        let (snap, path) = {
+                            let tab = &mut self.tabs[i];
+                            let s = tab.snap.read().unwrap();
+                            let names = tab.sel.selected_names(&s);
+                            let path = s.path.clone();
+                            drop(s);
+                            tab.reselect_after_load = Some(names);
+                            (tab.snap.clone(), path)
+                        };
+                        let g = self.enum_engine.navigate(&snap, path);
+                        self.tabs[i].gen_id = g;
                     }
                 }
                 EnumEvent::Error { gen_id, message } => {
@@ -1461,7 +1486,21 @@ impl FluxApp {
             self.wake_installed = true;
         }
         if self.watcher.poll_changed() {
-            self.refresh();
+            // An enumeration already running for this tab will observe
+            // the mid-write state; restarting it on every burst starves
+            // a large, actively-written directory forever. Flag one
+            // trailing refresh to run at Finished instead.
+            let loading = self
+                .current_tab()
+                .snap
+                .read()
+                .map(|s| s.state.is_loading())
+                .unwrap_or(false);
+            if loading {
+                self.current_tab_mut().watcher_refresh_pending = true;
+            } else {
+                self.refresh();
+            }
         } else if self.watcher.pending() {
             ctx.request_repaint_after(std::time::Duration::from_millis(100));
         }

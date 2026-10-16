@@ -443,6 +443,57 @@ fn properties_body(
         }
     });
 }
+/// Filesystem facts the row menu needs to decide which items to show.
+/// Computed once per menu instance and cached on the app —
+/// `has_real_dir` alone is one `symlink_metadata` per selected item, so
+/// re-statting every frame would stall the UI on large selections and
+/// slow filesystems.
+#[derive(Clone, Copy)]
+pub struct RowFlags {
+    pub single_dir: bool,
+    pub single_file: bool,
+    pub single_zip: bool,
+    pub has_real_dir: bool,
+}
+
+impl RowFlags {
+    fn compute(items: &[PathBuf]) -> Self {
+        let first = items.first();
+        let single = items.len() == 1;
+        let single_file = single && first.is_some_and(|p| p.is_file());
+        Self {
+            single_dir: single && first.is_some_and(|p| p.is_dir()),
+            single_file,
+            single_zip: single_file
+                && first.is_some_and(|p| {
+                    p.extension()
+                        .and_then(|e| e.to_str())
+                        .is_some_and(|e| e.eq_ignore_ascii_case("zip"))
+                }),
+            has_real_dir: items.iter().any(|p| {
+                std::fs::symlink_metadata(p)
+                    .map(|m| m.is_dir() && !m.file_type().is_symlink())
+                    .unwrap_or(false)
+            }),
+        }
+    }
+}
+
+fn row_flags(app: &mut FluxApp, items: &[PathBuf]) -> RowFlags {
+    use std::hash::{Hash, Hasher};
+    let mut h = rustc_hash::FxHasher::default();
+    items.hash(&mut h);
+    let key = h.finish();
+    if let Some((k, f)) = app.row_menu_flags
+        && k == key
+    {
+        return f;
+    }
+    let f = RowFlags::compute(items);
+    app.row_menu_flags = Some((key, f));
+    f
+}
+
 /// Context menu for a file row. `items`: paths the action applies to.
 pub fn row_context_menu(app: &mut FluxApp, ui: &mut egui::Ui, items: &[PathBuf]) {
     use crate::format::MOD_KEY as CMD;
@@ -450,7 +501,8 @@ pub fn row_context_menu(app: &mut FluxApp, ui: &mut egui::Ui, items: &[PathBuf])
     m::begin(ui, 224.0);
     let single = items.len() == 1;
     let first = items.first().cloned();
-    let single_dir = single && first.as_ref().is_some_and(|p| p.is_dir());
+    let flags = row_flags(app, items);
+    let single_dir = flags.single_dir;
     use crate::glyphs::Glyph;
     let clipboard_ready = !app.clipboard.items.is_empty() || app.ext_clipboard.is_some();
     if m::item_icon(ui, Glyph::External, "Open").clicked() {
@@ -475,8 +527,7 @@ pub fn row_context_menu(app: &mut FluxApp, ui: &mut egui::Ui, items: &[PathBuf])
         }
     }
     #[cfg(windows)]
-    if single && first.as_ref().is_some_and(|p| p.is_file()) && m::item(ui, "Open With…").clicked()
-    {
+    if single && flags.single_file && m::item(ui, "Open With…").clicked() {
         ui.close();
         if let Some(p) = first.clone()
             && let Err(e) = flux_platform::open_with_dialog(&p)
@@ -485,7 +536,7 @@ pub fn row_context_menu(app: &mut FluxApp, ui: &mut egui::Ui, items: &[PathBuf])
         }
     }
     #[cfg(not(windows))]
-    if single && first.as_ref().is_some_and(|p| p.is_file()) {
+    if single && flags.single_file {
         let target = first.clone().unwrap();
         let apps = app.open_with_apps(&target);
         m::submenu(ui, "Open With", |ui| {
@@ -550,14 +601,7 @@ pub fn row_context_menu(app: &mut FluxApp, ui: &mut egui::Ui, items: &[PathBuf])
     }
     // Single .zip → safe extraction (zip-slip guarded, staged when the
     // target dir is new).
-    let single_zip = single
-        && first.as_ref().is_some_and(|p| {
-            p.is_file()
-                && p.extension()
-                    .and_then(|e| e.to_str())
-                    .is_some_and(|e| e.eq_ignore_ascii_case("zip"))
-        });
-    if single_zip {
+    if flags.single_zip {
         let archive = first.clone().unwrap();
         let parent = archive
             .parent()
@@ -588,12 +632,7 @@ pub fn row_context_menu(app: &mut FluxApp, ui: &mut egui::Ui, items: &[PathBuf])
     // Opt-in recursive folder sizes — Dolphin/Explorer-Properties style.
     // Only real dirs qualify (symlinked dirs show their link, not the
     // target's content).
-    let has_real_dir = items.iter().any(|p| {
-        std::fs::symlink_metadata(p)
-            .map(|m| m.is_dir() && !m.file_type().is_symlink())
-            .unwrap_or(false)
-    });
-    if has_real_dir && m::item(ui, "Calculate Folder Size").clicked() {
+    if flags.has_real_dir && m::item(ui, "Calculate Folder Size").clicked() {
         ui.close();
         app.calculate_dir_sizes(items);
     }

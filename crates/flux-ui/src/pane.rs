@@ -186,6 +186,11 @@ pub struct Tab {
     pub deferred_load: bool,
     /// Scroll target for keyboard navigation.
     pub scroll_to_row: Option<usize>,
+    /// A watcher change arrived while this tab's enumeration was still
+    /// running. Restarting the scan on every burst would starve a large,
+    /// actively-written directory forever, so one trailing refresh runs
+    /// when the in-flight enumeration finishes instead.
+    pub watcher_refresh_pending: bool,
 }
 
 impl Tab {
@@ -204,6 +209,7 @@ impl Tab {
             pending_reselect: None,
             deferred_load: false,
             scroll_to_row: None,
+            watcher_refresh_pending: false,
         }
     }
 

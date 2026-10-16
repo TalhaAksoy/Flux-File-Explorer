@@ -32,9 +32,19 @@ pub enum Preview {
     Empty,
 }
 
+/// Filesystem metadata for the previewed path, gathered on the worker
+/// so the panel never stats the disk on the UI thread.
+pub struct PreviewMeta {
+    pub kind: &'static str,
+    /// File size; `None` for dirs/links (dir sizes need recursion).
+    pub size: Option<u64>,
+    pub modified: Option<std::time::SystemTime>,
+}
+
 pub struct PreviewMsg {
     pub path: PathBuf,
     pub preview: Preview,
+    pub meta: Option<PreviewMeta>,
 }
 
 /// Latest-request-wins worker. Results carry the requested path — the
@@ -63,8 +73,10 @@ impl PreviewEngine {
                     while let Ok(newer) = req_rx.try_recv() {
                         path = newer;
                     }
+                    let (preview, meta) = load(&path);
                     let msg = PreviewMsg {
-                        preview: load(&path),
+                        preview,
+                        meta,
                         path,
                     };
                     let _ = ev_tx.try_send(msg);
@@ -114,15 +126,27 @@ fn is_image_path(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-fn load(path: &Path) -> Preview {
+fn load(path: &Path) -> (Preview, Option<PreviewMeta>) {
     let Ok(md) = std::fs::symlink_metadata(path) else {
-        return Preview::Empty;
+        return (Preview::Empty, None);
     };
+    let meta = PreviewMeta {
+        kind: if md.file_type().is_symlink() {
+            "Link"
+        } else if md.is_dir() {
+            "Folder"
+        } else {
+            flux_platform::type_label(path.extension().and_then(|e| e.to_str()))
+        },
+        size: md.is_file().then_some(md.len()),
+        modified: md.modified().ok(),
+    };
+    let meta = Some(meta);
     if md.file_type().is_symlink() {
         let target = std::fs::read_link(path)
             .map(|t| t.display().to_string())
             .unwrap_or_else(|_| "?".into());
-        return Preview::Info(format!("Symbolic link → {target}"));
+        return (Preview::Info(format!("Symbolic link → {target}")), meta);
     }
     if md.is_dir() {
         let mut n = 0usize;
@@ -134,29 +158,35 @@ fn load(path: &Path) -> Preview {
                 n += 1;
             }
         }
-        return Preview::Info(if n >= DIR_COUNT_CAP {
-            format!("Folder — {DIR_COUNT_CAP}+ items")
-        } else {
-            format!("Folder — {n} item{}", if n == 1 { "" } else { "s" })
-        });
+        return (
+            Preview::Info(if n >= DIR_COUNT_CAP {
+                format!("Folder — {DIR_COUNT_CAP}+ items")
+            } else {
+                format!("Folder — {n} item{}", if n == 1 { "" } else { "s" })
+            }),
+            meta,
+        );
     }
     if is_image_path(path)
         && let Some(img) = decode_image(path)
     {
         let size = [img.width() as usize, img.height() as usize];
-        return Preview::Image(egui::ColorImage::from_rgba_unmultiplied(size, img.as_raw()));
+        return (
+            Preview::Image(egui::ColorImage::from_rgba_unmultiplied(size, img.as_raw())),
+            meta,
+        );
     }
     // Text sniff: NUL in the first chunk ⇒ binary.
     let Ok(mut f) = std::fs::File::open(path) else {
-        return Preview::Empty;
+        return (Preview::Empty, meta);
     };
     let mut buf = vec![0u8; TEXT_SNIFF];
     let Ok(n) = f.read(&mut buf) else {
-        return Preview::Empty;
+        return (Preview::Empty, meta);
     };
     buf.truncate(n);
     if buf[..n.min(8192)].contains(&0) {
-        return Preview::Empty;
+        return (Preview::Empty, meta);
     }
     let text = String::from_utf8_lossy(&buf);
     let capped: String = text
@@ -164,12 +194,15 @@ fn load(path: &Path) -> Preview {
         .take(TEXT_MAX_LINES)
         .collect::<Vec<_>>()
         .join("\n");
-    Preview::Text(
-        if n >= TEXT_SNIFF || text.lines().count() > TEXT_MAX_LINES {
-            format!("{capped}\n\n· · ·\n(truncated — {TEXT_SNIFF} KiB max)")
-        } else {
-            capped
-        },
+    (
+        Preview::Text(
+            if n >= TEXT_SNIFF || text.lines().count() > TEXT_MAX_LINES {
+                format!("{capped}\n\n· · ·\n(truncated — {TEXT_SNIFF} KiB max)")
+            } else {
+                capped
+            },
+        ),
+        meta,
     )
 }
 
@@ -280,20 +313,14 @@ pub fn panel(app: &mut FluxApp, ui: &mut egui::Ui) {
         }
     }
 
-    // Metadata rows — read live (cheap single stat).
-    if let Ok(md) = std::fs::symlink_metadata(&path) {
-        let kind = if md.file_type().is_symlink() {
-            "Link".to_string()
-        } else if md.is_dir() {
-            "Folder".to_string()
-        } else {
-            flux_platform::type_label(path.extension().and_then(|e| e.to_str())).to_string()
-        };
-        let mut rows = vec![("Type", kind)];
-        if md.is_file() {
-            rows.push(("Size", crate::format::format_size(md.len())));
+    // Metadata rows — gathered by the worker alongside the preview; no
+    // synchronous filesystem access on the UI thread.
+    if let Some(meta) = app.preview.as_ref().and_then(|m| m.meta.as_ref()) {
+        let mut rows = vec![("Type", meta.kind.to_string())];
+        if let Some(size) = meta.size {
+            rows.push(("Size", crate::format::format_size(size)));
         }
-        if let Ok(m) = md.modified() {
+        if let Some(m) = meta.modified {
             rows.push(("Modified", crate::format::format_mtime(Some(m))));
         }
         for (k, v) in rows {
