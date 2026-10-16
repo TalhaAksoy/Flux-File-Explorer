@@ -461,9 +461,11 @@ fn run_job(
             let mut dest = dest.clone();
             if dest.exists() {
                 match resolver(&items[0], &dest) {
-                    ConflictAction::Overwrite => {
-                        let _ = std::fs::remove_file(&dest);
-                    }
+                    // No pre-delete: compress stages to a temp and only
+                    // publishes (rename_replace) when the archive is
+                    // complete — the old zip survives a failed/cancelled
+                    // run instead of being removed up front.
+                    ConflictAction::Overwrite => {}
                     ConflictAction::KeepBoth => {
                         dest = crate::copy::duplicate_dst(&dest);
                     }
@@ -474,9 +476,9 @@ fn run_job(
             if let Err(e) = crate::archive::compress_items(items, &dest, &ctx) {
                 set_state(op, OpState::Failed(format!("compress: {e}")));
             }
-            if cancelled(&ctx) {
-                let _ = std::fs::remove_file(&dest);
-            }
+            // No dest cleanup on cancel: `dest` is never touched until
+            // the staged archive is complete, so there's nothing partial
+            // to sweep.
         }
         OpKind::Trash { items } => {
             if let Ok(mut p) = op.progress.lock() {

@@ -239,7 +239,8 @@ pub fn discover(c: &CopyCtx<'_>, sources: &[PathBuf]) {
 
 /// Claim a unique staging path next to `dst` via `create_new` — atomic,
 /// and it can never truncate a leftover `*.fluxpart-*` or a user file.
-fn create_staging(dst: &Path, tag: u64) -> std::io::Result<(PathBuf, fs::File)> {
+/// Also used by archive creation to stage complete zips before publish.
+pub(crate) fn create_staging(dst: &Path, tag: u64) -> std::io::Result<(PathBuf, fs::File)> {
     let base = dst
         .file_name()
         .map(|n| n.to_os_string())
@@ -278,6 +279,59 @@ fn unique_sibling(dst: &Path, marker: &str) -> PathBuf {
     dst.with_file_name(name)
 }
 
+/// `remove_file` that survives a read-only target — a Windows-only
+/// problem: POSIX `unlink` consults the directory's write bit, never the
+/// file's. Windows refuses to delete read-only files, so there the
+/// attribute is cleared and the delete retried. Used only on paths the
+/// caller has already decided to remove — never a first line of defense.
+fn remove_file_force(p: &Path) -> std::io::Result<()> {
+    let r = fs::remove_file(p);
+    #[cfg(windows)]
+    if matches!(&r, Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied) {
+        if let Ok(md) = fs::symlink_metadata(p)
+            && md.permissions().readonly()
+        {
+            let mut perms = md.permissions();
+            perms.set_readonly(false);
+            let _ = fs::set_permissions(p, perms);
+        }
+        return fs::remove_file(p);
+    }
+    r
+}
+
+/// `remove_dir_all` variant for trees we own that may contain read-only
+/// files (copied metadata preserves them). On Windows every read-only
+/// attribute is cleared and the removal retried; on POSIX a plain
+/// remove_dir_all already suffices (dir perms govern deletion).
+fn force_remove_dir_all(p: &Path) -> std::io::Result<()> {
+    let r = fs::remove_dir_all(p);
+    #[cfg(windows)]
+    if r.is_err() {
+        let mut stack = vec![p.to_path_buf()];
+        while let Some(d) = stack.pop() {
+            if let Ok(rd) = fs::read_dir(&d) {
+                for e in rd.flatten() {
+                    let ep = e.path();
+                    let Ok(m) = fs::symlink_metadata(&ep) else {
+                        continue;
+                    };
+                    if m.permissions().readonly() {
+                        let mut perms = m.permissions();
+                        perms.set_readonly(false);
+                        let _ = fs::set_permissions(&ep, perms);
+                    }
+                    if m.is_dir() && !m.file_type().is_symlink() {
+                        stack.push(ep);
+                    }
+                }
+            }
+        }
+        return fs::remove_dir_all(p);
+    }
+    r
+}
+
 /// Place `src` at `dst`, protecting any existing destination: the old
 /// entry is first moved aside and restored if the swap fails, so the
 /// user's previous data is never left unprotected. On unix `rename`
@@ -294,10 +348,10 @@ pub fn rename_replace(src: &Path, dst: &Path) -> std::io::Result<()> {
         Ok(()) => {
             match fs::symlink_metadata(&backup) {
                 Ok(m) if m.is_dir() && !m.file_type().is_symlink() => {
-                    let _ = fs::remove_dir_all(&backup);
+                    let _ = force_remove_dir_all(&backup);
                 }
                 _ => {
-                    let _ = fs::remove_file(&backup);
+                    let _ = remove_file_force(&backup);
                 }
             }
             Ok(())
@@ -528,9 +582,31 @@ pub fn copy_file(src: &Path, dst: &Path, c: &CopyCtx<'_>) -> std::io::Result<Ite
     Err(std::io::Error::other("destination kept changing under us"))
 }
 
-/// Recreate `src` symlink at `dst` (link contents preserved, never followed).
+/// Create a symlink at `p` pointing to `target`, choosing dir/file flavor
+/// on Windows from whether `src`'s target is a directory.
+fn make_link(src: &Path, target: &Path, p: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        let _ = src;
+        std::os::unix::fs::symlink(target, p)
+    }
+    #[cfg(windows)]
+    {
+        if src.is_dir() {
+            std::os::windows::fs::symlink_dir(target, p)
+        } else {
+            std::os::windows::fs::symlink_file(target, p)
+        }
+    }
+}
+
+/// Recreate `src` symlink at `dst` (link contents preserved, never
+/// followed). The link is created at a temp sibling and renamed into
+/// place — the same commit discipline as file copies, so an existing
+/// destination is only touched when the user chose Overwrite, and even
+/// then via the backup-swap that can restore it.
 fn copy_symlink(src: &Path, dst: &Path, c: &CopyCtx<'_>) -> std::io::Result<ItemOutcome> {
-    let Some((dst, _)) = resolve_dest(src, dst, c) else {
+    let Some((dst, existed)) = resolve_dest(src, dst, c) else {
         return Ok(if cancelled(c) {
             ItemOutcome::Cancelled
         } else {
@@ -538,15 +614,19 @@ fn copy_symlink(src: &Path, dst: &Path, c: &CopyCtx<'_>) -> std::io::Result<Item
         });
     };
     let target = fs::read_link(src)?;
-    #[cfg(unix)]
-    std::os::unix::fs::symlink(&target, &dst)?;
-    #[cfg(windows)]
-    {
-        if src.is_dir() {
-            std::os::windows::fs::symlink_dir(&target, &dst)?;
-        } else {
-            std::os::windows::fs::symlink_file(&target, &dst)?;
-        }
+    let tmp = unique_sibling(&dst, ".fluxlink");
+    if let Err(e) = make_link(src, &target, &tmp) {
+        let _ = fs::remove_file(&tmp);
+        return Err(e);
+    }
+    let r = if existed {
+        rename_replace(&tmp, &dst)
+    } else {
+        fs::rename(&tmp, &dst)
+    };
+    if let Err(e) = r {
+        let _ = fs::remove_file(&tmp);
+        return Err(e);
     }
     Ok(ItemOutcome::Done)
 }
@@ -682,7 +762,7 @@ fn prune_inner(p: &Path, failed: &FxHashSet<PathBuf>) -> std::io::Result<bool> {
         }
         return Ok(true);
     }
-    fs::remove_file(p)?;
+    remove_file_force(p)?;
     Ok(false)
 }
 
@@ -840,7 +920,7 @@ pub fn remove_tree(path: &Path, c: &CopyCtx<'_>) -> std::io::Result<()> {
                     match ft {
                         Ok(t) if t.is_dir() && !t.is_symlink() => stack.push((cp, false)),
                         _ => {
-                            if let Err(err) = fs::remove_file(&cp) {
+                            if let Err(err) = remove_file_force(&cp) {
                                 note_error(c, format!("{}: {err}", cp.display()));
                             }
                             set_state(c, |p2| p2.done_items += 1);
@@ -851,7 +931,7 @@ pub fn remove_tree(path: &Path, c: &CopyCtx<'_>) -> std::io::Result<()> {
         }
         Ok(())
     } else {
-        fs::remove_file(path)
+        remove_file_force(path)
     }
 }
 
@@ -894,7 +974,9 @@ pub fn cleanup_created(c: &CopyCtx<'_>) {
     let mut dirs = c.created_dirs.lock().unwrap().drain(..).collect::<Vec<_>>();
     dirs.sort_by_key(|d| std::cmp::Reverse(d.components().count()));
     for d in dirs {
-        // remove_dir_all only on dirs we created: they contain only our files.
-        let _ = fs::remove_dir_all(&d);
+        // remove_dir_all only on dirs we created: they contain only our
+        // files — which preserve_metadata may have marked read-only, so
+        // use the force variant.
+        let _ = force_remove_dir_all(&d);
     }
 }
