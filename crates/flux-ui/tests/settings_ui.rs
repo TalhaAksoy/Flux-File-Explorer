@@ -302,23 +302,22 @@ fn reset_all_restores_defaults_and_keeps_tabs() {
 }
 
 #[test]
-#[allow(unsafe_code)] // env var must be redirected for the test process
 fn theme_persists_across_restart() {
-    // Point the settings file at a temp path, click Dark via the real
-    // control, save, then rebuild the app — the "restart".
+    // Click Dark via the real control, save to an explicit path, then
+    // reload — the "restart". Path-explicit calls keep this test free of
+    // the process-global FLUX_SETTINGS_PATH race.
     let dir = std::env::temp_dir().join(format!("flux-test-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    unsafe { std::env::set_var("FLUX_SETTINGS_PATH", dir.join("settings.json")) };
+    let path = dir.join("settings.json");
 
     let (ctx, mut app) = settings_app();
     frame(&ctx, &mut app, input(Vec::new()));
     click_at(&ctx, &mut app, segmented_cells(&ctx, 0)[1].center()); // Dark
     assert_eq!(app.settings.theme, flux_settings::Theme::Dark);
-    flux_settings::save(&app.settings).unwrap();
+    flux_settings::save_to(&app.settings, &path).unwrap();
 
-    let loaded = flux_settings::load();
+    let loaded = flux_settings::load_from(&path);
     assert_eq!(loaded.theme, flux_settings::Theme::Dark);
-    unsafe { std::env::remove_var("FLUX_SETTINGS_PATH") };
     std::fs::remove_dir_all(&dir).ok();
 }
 

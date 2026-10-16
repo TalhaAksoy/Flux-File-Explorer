@@ -122,8 +122,11 @@ fn settings_path() -> PathBuf {
 }
 
 pub fn load() -> Settings {
-    let path = settings_path();
-    match std::fs::read_to_string(&path) {
+    load_from(&settings_path())
+}
+
+pub fn load_from(path: &std::path::Path) -> Settings {
+    match std::fs::read_to_string(path) {
         Ok(text) => serde_json::from_str(&text).unwrap_or_else(|e| {
             tracing::warn!("settings parse failed ({e}); using defaults");
             Settings::default()
@@ -134,7 +137,12 @@ pub fn load() -> Settings {
 
 /// Atomic write: temp file + rename within the same directory.
 pub fn save(s: &Settings) -> io::Result<()> {
-    let path = settings_path();
+    save_to(s, &settings_path())
+}
+
+/// Atomic write to an explicit path: temp file + rename within the same
+/// directory.
+pub fn save_to(s: &Settings, path: &std::path::Path) -> io::Result<()> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
@@ -142,7 +150,7 @@ pub fn save(s: &Settings) -> io::Result<()> {
     let text = serde_json::to_string_pretty(s)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
     std::fs::write(&tmp, text)?;
-    std::fs::rename(&tmp, &path)
+    std::fs::rename(&tmp, path)
 }
 
 pub fn push_recent(s: &mut Settings, path: PathBuf) {
