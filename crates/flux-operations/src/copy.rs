@@ -111,6 +111,9 @@ fn dst_exists(dst: &Path) -> bool {
 pub fn same_file(a: &Path, b: &Path) -> bool {
     #[cfg(unix)]
     {
+        // stat-based identity — must NOT open the path: opening a FIFO
+        // blocks forever and unreadable files can't be opened at all,
+        // while dev+ino comparison needs neither.
         use std::os::unix::fs::MetadataExt;
         if let (Ok(x), Ok(y)) = (fs::metadata(a), fs::metadata(b)) {
             return x.dev() == y.dev() && x.ino() == y.ino();
@@ -118,10 +121,14 @@ pub fn same_file(a: &Path, b: &Path) -> bool {
     }
     #[cfg(windows)]
     {
-        use std::os::windows::fs::MetadataExt;
-        if let (Ok(x), Ok(y)) = (fs::metadata(a), fs::metadata(b)) {
-            return x.volume_serial_number() == y.volume_serial_number()
-                && x.file_index() == y.file_index();
+        // `std::os::windows::fs::MetadataExt::{volume_serial_number,
+        // file_index}` is still unstable (`windows_by_handle`); same-file's
+        // Handle compares exactly those fields via a proper CreateFile.
+        if let (Ok(x), Ok(y)) = (
+            same_file::Handle::from_path(a),
+            same_file::Handle::from_path(b),
+        ) {
+            return x == y;
         }
     }
     match (fs::canonicalize(a), fs::canonicalize(b)) {

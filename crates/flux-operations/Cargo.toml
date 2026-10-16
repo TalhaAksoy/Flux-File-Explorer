@@ -12,6 +12,7 @@ flux-platform.workspace = true
 filetime.workspace = true
 regex.workspace = true
 rustc-hash.workspace = true
+same-file.workspace = true
 tracing.workspace = true
 zip = { version = "9", default-features = false, features = ["deflate"] }
 
