@@ -284,6 +284,9 @@ fn unique_sibling(dst: &Path, marker: &str) -> PathBuf {
 /// file's. Windows refuses to delete read-only files, so there the
 /// attribute is cleared and the delete retried. Used only on paths the
 /// caller has already decided to remove — never a first line of defense.
+/// The lint's world-writable concern doesn't apply: this branch is
+/// Windows-gated, where set_readonly only toggles the attribute bit.
+#[cfg_attr(windows, allow(clippy::permissions_set_readonly_false))]
 fn remove_file_force(p: &Path) -> std::io::Result<()> {
     let r = fs::remove_file(p);
     #[cfg(windows)]
@@ -304,6 +307,8 @@ fn remove_file_force(p: &Path) -> std::io::Result<()> {
 /// files (copied metadata preserves them). On Windows every read-only
 /// attribute is cleared and the removal retried; on POSIX a plain
 /// remove_dir_all already suffices (dir perms govern deletion).
+/// Same Windows-gated justification as `remove_file_force` above.
+#[cfg_attr(windows, allow(clippy::permissions_set_readonly_false))]
 fn force_remove_dir_all(p: &Path) -> std::io::Result<()> {
     let r = fs::remove_dir_all(p);
     #[cfg(windows)]

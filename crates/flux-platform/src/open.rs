@@ -149,11 +149,11 @@ pub struct OpenWithApp {
 pub fn open_with(path: &Path, app: &OpenWithApp) -> io::Result<()> {
     #[cfg(target_os = "macos")]
     {
-        return Command::new("open")
+        Command::new("open")
             .args(["-a", &app.id])
             .arg(path)
             .spawn()
-            .map(|_| ());
+            .map(|_| ())
     }
     #[cfg(all(unix, not(target_os = "macos")))]
     {
@@ -190,7 +190,8 @@ pub fn open_with(path: &Path, app: &OpenWithApp) -> io::Result<()> {
 pub fn open_with_apps(path: &Path) -> Vec<OpenWithApp> {
     #[cfg(target_os = "macos")]
     {
-        return macos_apps();
+        let _ = path;
+        macos_apps()
     }
     #[cfg(all(unix, not(target_os = "macos")))]
     {
