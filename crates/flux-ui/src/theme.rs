@@ -748,21 +748,30 @@ pub fn system_fonts(mono: bool) -> &'static [SystemFont] {
             if is_mono != mono {
                 continue;
             }
+            // A family name in a non-Latin script renders as tofu in the
+            // UI font — fall back to the readable file stem.
+            let label = if family.chars().any(|c| c as u32 >= 0x2E80) {
+                f.file_stem()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or(family)
+            } else {
+                family
+            };
             let regular = subfamily.is_empty()
                 || ["regular", "book", "roman", "normal", "plain"]
                     .iter()
                     .any(|w| subfamily.contains(w));
             let entry = SystemFont {
-                label: family.clone(),
+                label: label.clone(),
                 path: f.clone(),
                 mono,
             };
             if regular {
                 // Always (re)insert: replaces a non-regular face or the
                 // previous regular — deterministic given the sorted scan.
-                by_family.insert(family.clone(), entry);
+                by_family.insert(label.clone(), entry);
             } else {
-                by_family.entry(family).or_insert(entry);
+                by_family.entry(label).or_insert(entry);
             }
         }
         by_family.into_values().collect()
@@ -799,13 +808,17 @@ fn ttf_meta(data: &[u8]) -> Option<(String, String, bool)> {
     }
     let count = u16::from_be_bytes(table[2..4].try_into().ok()?) as usize;
     let storage = u16::from_be_bytes(table[4..6].try_into().ok()?) as usize;
-    // Best record per platform: prefer Windows (3) UTF-16 names.
+    // Best record wins: English (langID 0x0409) UTF-16 names first,
+    // then other Unicode-platform records, then Mac Roman. CJK fonts
+    // often put a localized name first — a blind first-match returns
+    // glyphs the UI font can't draw (tofu boxes).
     let pick = |want: u16| -> Option<String> {
-        let mut mac_fallback = None;
+        let mut best: Option<(u8, String)> = None;
         for i in 0..count {
             let r = 6 + i * 12;
             let rec = table.get(r..r + 12)?;
             let platform = u16::from_be_bytes(rec[0..2].try_into().ok()?);
+            let lang = u16::from_be_bytes(rec[4..6].try_into().ok()?);
             let name_id = u16::from_be_bytes(rec[6..8].try_into().ok()?);
             let slen = u16::from_be_bytes(rec[8..10].try_into().ok()?) as usize;
             let soff = u16::from_be_bytes(rec[10..12].try_into().ok()?) as usize;
@@ -813,20 +826,33 @@ fn ttf_meta(data: &[u8]) -> Option<(String, String, bool)> {
                 continue;
             }
             let raw = table.get(storage + soff..storage + soff + slen)?;
-            if platform == 3 {
-                // UTF-16BE
-                return String::from_utf16(
-                    &raw.as_chunks::<2>()
-                        .0
-                        .iter()
-                        .map(|c| u16::from_be_bytes(*c))
-                        .collect::<Vec<_>>(),
-                )
-                .ok();
+            let (score, s) = match platform {
+                // Windows (3) and Unicode (0) platforms: UTF-16BE.
+                0 | 3 => {
+                    let s = String::from_utf16(
+                        &raw.as_chunks::<2>()
+                            .0
+                            .iter()
+                            .map(|c| u16::from_be_bytes(*c))
+                            .collect::<Vec<_>>(),
+                    )
+                    .ok()?;
+                    let score = match lang {
+                        0x0409 => 4u8, // US English
+                        0x0000 => 3,   // language neutral
+                        l if l & 0xff00 == 0x0400 => 2,
+                        _ => 1,
+                    };
+                    (score, s)
+                }
+                1 => (1u8, raw.iter().map(|&b| b as char).collect::<String>()),
+                _ => continue,
+            };
+            if best.as_ref().is_none_or(|(b, _)| score > *b) {
+                best = Some((score, s));
             }
-            mac_fallback.get_or_insert_with(|| raw.iter().map(|&b| b as char).collect::<String>());
         }
-        mac_fallback
+        best.map(|(_, s)| s)
     };
     let family = pick(16).or_else(|| pick(1))?.trim().to_string();
     if family.is_empty() {
