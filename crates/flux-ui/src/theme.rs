@@ -4,7 +4,7 @@
 
 use egui::{Color32, CornerRadius, Stroke, Style, Visuals};
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Density {
     Compact,
     Standard,

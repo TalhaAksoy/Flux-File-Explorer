@@ -30,7 +30,7 @@ pub fn page(app: &mut FluxApp, ui: &mut egui::Ui) {
     if ui.available_width() < NARROW_W {
         // Compact stacking: rules collapse into a disclosure header so the
         // preview keeps as much height as possible.
-        let open_id = ui.id().with("rules_open");
+        let open_id = ui.id().with(("rules_open", app.active));
         let open = ui.data_mut(|d| d.get_temp(open_id)).unwrap_or(false);
         let header_resp = ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 6.0;
@@ -64,7 +64,7 @@ pub fn page(app: &mut FluxApp, ui: &mut egui::Ui) {
         });
         let resp = ui.interact(
             header_resp.response.rect,
-            ui.id().with("rules_hdr"),
+            ui.id().with(("rules_hdr", app.active)),
             egui::Sense::click(),
         );
         if resp.clicked() {
@@ -196,7 +196,7 @@ fn rules(app: &mut FluxApp, ui: &mut egui::Ui, pal: &Palette) {
         );
         ui.add_space(4.0);
         let mut v = br.regex;
-        if widgets::switch(ui, &mut v).changed() {
+        if widgets::switch(ui, "rename.regex", &mut v).changed() {
             br.regex = v;
             br.mark_dirty();
         }
@@ -208,7 +208,7 @@ fn rules(app: &mut FluxApp, ui: &mut egui::Ui, pal: &Palette) {
         );
         ui.add_space(4.0);
         let mut v = br.case_sensitive;
-        if widgets::switch(ui, &mut v).changed() {
+        if widgets::switch(ui, "rename.case_sensitive", &mut v).changed() {
             br.case_sensitive = v;
             br.mark_dirty();
         }
@@ -218,6 +218,7 @@ fn rules(app: &mut FluxApp, ui: &mut egui::Ui, pal: &Palette) {
     if let Some(v) = widgets::segmented(
         ui,
         pal,
+        "rename.case_mode",
         &[(0usize, "Keep"), (1, "ABC"), (2, "abc"), (3, "Title")],
         br.case_mode,
     ) {
@@ -233,7 +234,7 @@ fn rules(app: &mut FluxApp, ui: &mut egui::Ui, pal: &Palette) {
     );
     ui.horizontal(|ui| {
         let mut v = br.numbering;
-        if widgets::switch(ui, &mut v).changed() {
+        if widgets::switch(ui, "rename.numbering", &mut v).changed() {
             br.numbering = v;
             br.mark_dirty();
         }
@@ -283,6 +284,7 @@ fn rules(app: &mut FluxApp, ui: &mut egui::Ui, pal: &Palette) {
         if let Some(v) = widgets::segmented(
             ui,
             pal,
+            "rename.num_affix",
             &[(false, "Suffix"), (true, "Prefix")],
             br.num_prefix,
         ) {
@@ -304,7 +306,7 @@ fn rules(app: &mut FluxApp, ui: &mut egui::Ui, pal: &Palette) {
     widgets::section_heading(ui, pal, "Extension", None);
     ui.horizontal(|ui| {
         let mut on = br.set_ext.is_some();
-        if widgets::switch(ui, &mut on).changed() {
+        if widgets::switch(ui, "rename.set_ext", &mut on).changed() {
             br.set_ext = on.then(String::new);
             br.mark_dirty();
         }
@@ -357,7 +359,7 @@ fn preview_and_footer(app: &mut FluxApp, ui: &mut egui::Ui, pal: &Palette) {
             (RenameFilter::Unchanged, "Unchanged"),
             (RenameFilter::Issues, "Issues"),
         ];
-        if let Some(f) = widgets::segmented(ui, pal, &opts, br.filter) {
+        if let Some(f) = widgets::segmented(ui, pal, "rename.filter", &opts, br.filter) {
             br.filter = f;
         }
         ui.add_space(sp::MD);

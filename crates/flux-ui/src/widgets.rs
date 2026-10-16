@@ -65,9 +65,14 @@ pub fn danger_button(ui: &mut Ui, label: &str) -> Response {
 
 /// iOS-style switch: 34×20 pill with a sliding knob. Clearer than a
 /// checkbox for preferences that apply immediately.
-pub fn switch(ui: &mut Ui, on: &mut bool) -> Response {
+///
+/// `id` must be stable and unique (e.g. `"settings.hidden_files"`) —
+/// anonymous child UIs share `Ui::id`, so an unsalted switch id could
+/// alias another control's widget state.
+pub fn switch(ui: &mut Ui, id: &'static str, on: &mut bool) -> Response {
     let pal = Palette::of(&ui.style().visuals);
-    let (rect, mut resp) = ui.allocate_exact_size(Vec2::new(36.0, 20.0), Sense::click());
+    let (_, rect) = ui.allocate_space(Vec2::new(36.0, 20.0));
+    let mut resp = ui.interact(rect, ui.id().with(("switch", id)), Sense::click());
     if resp.clicked() {
         *on = !*on;
         resp.mark_changed();
@@ -171,9 +176,15 @@ pub fn row_divider(ui: &mut Ui, pal: &Palette) {
 
 /// Segmented control (macOS-style): one inset pill per option inside a
 /// recessed track. `options` are (label, value); returns the clicked value.
+///
+/// `id` MUST be a stable, unique identifier for the control
+/// (e.g. `"settings.theme"`) — egui gives anonymous child UIs the same
+/// `Ui::id`, so deriving interaction ids from `ui.id()` alone makes
+/// every segmented control on a page share ids and cross-fire clicks.
 pub fn segmented<T: PartialEq + Copy>(
     ui: &mut Ui,
     pal: &Palette,
+    id: &'static str,
     options: &[(T, &str)],
     current: T,
 ) -> Option<T> {
@@ -204,7 +215,7 @@ pub fn segmented<T: PartialEq + Copy>(
             Pos2::new(x, rect.top() + pad),
             Vec2::new(widths[i], h - pad * 2.0),
         );
-        let resp = ui.interact(cell, ui.id().with("seg").with(i), Sense::click());
+        let resp = ui.interact(cell, ui.id().with(("seg", id, i)), Sense::click());
         let on = *val == current;
         if on {
             ui.painter().rect(

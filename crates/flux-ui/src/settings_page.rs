@@ -527,7 +527,7 @@ fn setting_row(
             ),
             |ui| {
                 let mut v = app.settings.show_hidden;
-                if widgets::switch(ui, &mut v).changed() {
+                if widgets::switch(ui, "settings.files.show_hidden", &mut v).changed() {
                     app.toggle_hidden();
                 }
             },
@@ -543,7 +543,7 @@ fn setting_row(
             }),
             |ui| {
                 let mut v = app.settings.show_system_files;
-                if widgets::switch(ui, &mut v).changed() {
+                if widgets::switch(ui, "settings.files.show_system", &mut v).changed() {
                     app.set_show_system_files(v);
                     app.settings_dirty_at = Some(std::time::Instant::now());
                 }
@@ -556,7 +556,7 @@ fn setting_row(
             Some("Ask before Shift+Delete permanently removes items."),
             |ui| {
                 let mut v = app.settings.confirm_permanent_delete;
-                if widgets::switch(ui, &mut v).changed() {
+                if widgets::switch(ui, "settings.files.confirm_delete", &mut v).changed() {
                     app.settings.confirm_permanent_delete = v;
                     app.settings_dirty_at = Some(std::time::Instant::now());
                 }
@@ -572,6 +572,7 @@ fn setting_row(
                 if let Some(v) = widgets::segmented(
                     ui,
                     pal,
+                    "settings.views.default_view",
                     &[
                         (ViewMode::List, "Details"),
                         (ViewMode::Compact, "Compact"),
@@ -594,6 +595,7 @@ fn setting_row(
                 if let Some(v) = widgets::segmented(
                     ui,
                     pal,
+                    "settings.views.row_density",
                     &[
                         (crate::theme::Density::Compact, "Compact"),
                         (crate::theme::Density::Standard, "Standard"),
@@ -613,7 +615,7 @@ fn setting_row(
             Some("Right-side preview and metadata pane. (Alt+P)"),
             |ui| {
                 let mut v = app.settings.show_preview;
-                if widgets::switch(ui, &mut v).changed() {
+                if widgets::switch(ui, "settings.views.preview_panel", &mut v).changed() {
                     app.toggle_preview();
                 }
             },
@@ -625,7 +627,7 @@ fn setting_row(
             Some("Group directories above files regardless of sort column."),
             |ui| {
                 let mut v = app.settings.dirs_first;
-                if widgets::switch(ui, &mut v).changed() {
+                if widgets::switch(ui, "settings.views.dirs_first", &mut v).changed() {
                     app.settings.dirs_first = v;
                     // Live-apply to the most recent directory tab — the
                     // Settings tab itself has no snapshot to resort.
@@ -648,6 +650,7 @@ fn setting_row(
                 if let Some(v) = widgets::segmented(
                     ui,
                     pal,
+                    "settings.views.sort_key",
                     &[
                         ("name", "Name"),
                         ("size", "Size"),
@@ -663,9 +666,13 @@ fn setting_row(
         ),
         SettingId::SortDir => widgets::setting_row(ui, pal, "Default sort direction", None, |ui| {
             let desc = app.settings.sort_desc;
-            if let Some(v) =
-                widgets::segmented(ui, pal, &[(false, "Ascending"), (true, "Descending")], desc)
-            {
+            if let Some(v) = widgets::segmented(
+                ui,
+                pal,
+                "settings.views.sort_dir",
+                &[(false, "Ascending"), (true, "Descending")],
+                desc,
+            ) {
                 app.settings.sort_desc = v;
                 app.settings_dirty_at = Some(std::time::Instant::now());
             }
@@ -690,6 +697,7 @@ fn appearance(app: &mut FluxApp, ui: &mut egui::Ui, ctx: &egui::Context, pal: &P
             if let Some(v) = widgets::segmented(
                 ui,
                 pal,
+                "settings.appearance.density",
                 &[
                     (crate::theme::Density::Compact, "Compact"),
                     (crate::theme::Density::Standard, "Standard"),
@@ -715,6 +723,7 @@ fn theme_row(app: &mut FluxApp, ui: &mut egui::Ui, ctx: &egui::Context, pal: &Pa
             if let Some(v) = widgets::segmented(
                 ui,
                 pal,
+                "settings.appearance.theme",
                 &[
                     (Theme::Light, "Light"),
                     (Theme::Dark, "Dark"),

@@ -28,6 +28,9 @@ pub struct RowAction {
     pub drag_start: Option<usize>,
     /// While dragging: the hovered directory row (drop target).
     pub drop_row: Option<usize>,
+    /// Entry index the pointer rests on — drives Space-preview's
+    /// hover-first target resolution.
+    pub hovered: Option<EntryIdx>,
     /// Min/max entry index of the rows actually rendered this frame —
     /// fed to `MetaEngine::set_priority` so background statting covers
     /// the viewport first. A superset range is fine: the engine still
@@ -385,6 +388,9 @@ pub fn file_table(app: &mut FluxApp, ui: &mut egui::Ui) -> RowAction {
             });
 
             let resp = row.response();
+            if resp.hovered() {
+                action.hovered = Some(idx);
+            }
             if resp.drag_started() {
                 action.drag_start = Some(row_idx);
             }
@@ -526,6 +532,9 @@ fn compact_list(app: &mut FluxApp, ui: &mut egui::Ui, pal: &Palette) -> RowActio
                 );
             });
             let resp = row.response();
+            if resp.hovered() {
+                action.hovered = Some(idx);
+            }
             if resp.drag_started() {
                 action.drag_start = Some(row_idx);
             }
@@ -706,6 +715,9 @@ fn icon_grid(app: &mut FluxApp, ui: &mut egui::Ui, pal: &Palette, cell_w: f32) -
                             pal.text_primary.gamma_multiply(ghost),
                         );
 
+                        if resp.hovered() {
+                            action.hovered = Some(idx);
+                        }
                         if resp.drag_started() {
                             action.drag_start = Some(row_idx);
                         }

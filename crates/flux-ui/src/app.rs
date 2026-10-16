@@ -413,8 +413,29 @@ pub struct FluxApp {
     /// completed result (only applied while it still matches the request).
     pub preview_engine: crate::preview::PreviewEngine,
     pub preview_req: Option<PathBuf>,
-    pub preview: Option<crate::preview::PreviewMsg>,
+    /// The visual preview — phase-2 worker delivery.
+    pub preview: Option<crate::preview::Preview>,
+    /// Filesystem metadata — phase-1 worker delivery (arrives first).
+    pub preview_meta: Option<crate::preview::PreviewMeta>,
     pub preview_tex: Option<egui::TextureHandle>,
+    /// Opt-in expensive metadata (SHA-256, recursive dir size) — only
+    /// ever runs when the user clicks the panel button. `meta_op` is
+    /// the last completed result; `meta_op_pending` shows the spinner.
+    pub meta_ops: crate::preview::MetaOps,
+    pub meta_op: Option<crate::preview::MetaOpMsg>,
+    pub meta_op_pending: Option<(PathBuf, crate::preview::MetaOp)>,
+    /// File row the pointer rests on, refreshed by the views each frame.
+    /// Space resolves this first — preview the hovered file even when
+    /// it isn't selected.
+    pub hovered_path: Option<PathBuf>,
+    /// Explicit Space-pinned preview target. Wins over focus while it
+    /// stays valid; `pin_anchor` remembers the focused path at pin time
+    /// so a real focus change can drop the pin.
+    pub preview_pin: Option<PathBuf>,
+    pub pin_anchor: Option<PathBuf>,
+    /// Space key state last frame — rising-edge detection so key-repeat
+    /// can't machine-gun the panel open/closed.
+    pub space_was_down: bool,
     /// Debounce marker for settings writes: set when a frame mutates
     /// persisted state (e.g. column resize); flushed after a quiet period
     /// so resizing doesn't write settings.json every frame.
@@ -462,6 +483,10 @@ pub struct ShotCfg {
     /// `row` opens the file context menu on the first row; `bg` the
     /// empty-space menu.
     pub menu: Option<String>,
+    /// `FLUX_SHOT_PREVIEW` — filename to pin into the open details
+    /// panel (simulates a Space-preview end state).
+    pub preview_name: Option<String>,
+    pub preview_done: bool,
 }
 
 impl ShotCfg {
@@ -479,6 +504,8 @@ impl ShotCfg {
             screen_done: false,
             size: shot_size_env(),
             menu: std::env::var("FLUX_SHOT_MENU").ok(),
+            preview_name: std::env::var("FLUX_SHOT_PREVIEW").ok(),
+            preview_done: false,
         })
     }
 }
@@ -743,7 +770,15 @@ impl FluxApp {
             preview_engine: crate::preview::PreviewEngine::new(),
             preview_req: None,
             preview: None,
+            preview_meta: None,
             preview_tex: None,
+            meta_ops: crate::preview::MetaOps::new(),
+            meta_op: None,
+            meta_op_pending: None,
+            hovered_path: None,
+            preview_pin: None,
+            pin_anchor: None,
+            space_was_down: false,
             settings_dirty_at: None,
             open_with_cache: None,
             row_menu_flags: None,
@@ -952,6 +987,48 @@ impl FluxApp {
             return s.entry_path(idx);
         }
         tab.sel.ids.iter().next().and_then(|&i| s.entry_path(i))
+    }
+
+    /// What the preview panel shows: an explicit Space pin wins while
+    /// it's still inside the current directory; otherwise normal
+    /// selection-driven preview applies.
+    pub fn preview_target(&mut self) -> Option<PathBuf> {
+        // Drop the pin when focus actually moved — pinning a hovered
+        // file must not freeze the panel against real navigation.
+        if self.preview_pin.is_some() && self.focused_path() != self.pin_anchor {
+            self.preview_pin = None;
+        }
+        if let Some(pin) = &self.preview_pin {
+            let under = self
+                .current_path()
+                .map(|cwd| pin.parent() == Some(cwd.as_path()));
+            if under == Some(true) {
+                return Some(pin.clone());
+            }
+            self.preview_pin = None;
+        }
+        self.focused_path()
+    }
+
+    /// Space key on a file row: preview the hovered file, else the
+    /// keyboard-focused one, else the sole selection. Pressing Space on
+    /// the same pinned file toggles the panel closed. Selection is
+    /// never mutated — Space can't disturb copy/cut/rename targets.
+    pub fn space_preview(&mut self) {
+        let target = self.hovered_path.clone().or_else(|| self.focused_path());
+        let Some(t) = target else { return };
+        if self.settings.show_preview && self.preview_pin.as_ref() == Some(&t) {
+            self.settings.show_preview = false;
+            self.preview_pin = None;
+            self.settings_dirty_at = Some(Instant::now());
+            return;
+        }
+        self.pin_anchor = self.focused_path();
+        self.preview_pin = Some(t);
+        if !self.settings.show_preview {
+            self.settings.show_preview = true;
+            self.settings_dirty_at = Some(Instant::now());
+        }
     }
 
     /// Apply `settings.ui_scale` and resize the OS window by the same
@@ -1589,16 +1666,29 @@ impl FluxApp {
         // the one in focus; uploads the texture for image previews.
         for msg in self.preview_engine.drain_events().collect::<Vec<_>>() {
             if self.preview_req.as_ref() == Some(&msg.path) {
-                if let crate::preview::Preview::Image(img) = &msg.preview {
+                if let Some(crate::preview::Preview::Image(img)) = &msg.preview {
                     self.preview_tex = Some(ctx.load_texture(
                         "preview",
                         img.clone(),
                         egui::TextureOptions::LINEAR,
                     ));
                 }
-                self.preview = Some(msg);
+                if let Some(p) = msg.preview {
+                    self.preview = Some(p);
+                }
+                if msg.meta.is_some() {
+                    self.preview_meta = msg.meta;
+                }
             }
             ctx.request_repaint();
+        }
+        // Opt-in metadata ops (SHA-256 / recursive folder size) — keep
+        // only results for the path still being previewed.
+        for msg in self.meta_ops.drain_events().collect::<Vec<_>>() {
+            if self.preview_req.as_ref() == Some(&msg.path) {
+                self.meta_op = Some(msg);
+                ctx.request_repaint();
+            }
         }
         // Opt-in folder sizes: apply_size already wrote under the snap
         // lock; events just drive repaint + resort when sorting by size.
@@ -2052,5 +2142,102 @@ mod tests {
         a.open_settings();
         a.activate_tab(0);
         assert_eq!(a.current_dir().unwrap().filter, "marker");
+    }
+}
+
+#[cfg(test)]
+mod space_tests {
+    use super::*;
+    use flux_core::DirEntry;
+
+    fn file(name: &str) -> DirEntry {
+        DirEntry {
+            name: name.into(),
+            kind: flux_core::EntryKind::File,
+            size: 3,
+            mtime: None,
+            readonly: false,
+            hidden: false,
+            system: false,
+        }
+    }
+
+    /// App with two files pushed into its snapshot; returns (app, cwd).
+    fn app_with_files() -> (FluxApp, PathBuf) {
+        let a = {
+            let mut s = Settings::default();
+            s.tabs.clear();
+            FluxApp::from_settings(s)
+        };
+        let cwd = a.current_path().unwrap();
+        a.current_dir()
+            .unwrap()
+            .snap
+            .write()
+            .unwrap()
+            .push_batch(&mut vec![file("a.txt"), file("b.txt")]);
+        (a, cwd)
+    }
+
+    #[test]
+    fn space_pins_the_hovered_file() {
+        let (mut a, cwd) = app_with_files();
+        a.hovered_path = Some(cwd.join("b.txt"));
+        a.space_preview();
+        assert!(a.settings.show_preview);
+        assert_eq!(a.preview_pin.as_deref(), Some(cwd.join("b.txt").as_path()));
+        // Selection untouched — hover must not mutate copy/cut targets.
+        assert!(a.current_dir().unwrap().sel.ids.is_empty());
+    }
+
+    #[test]
+    fn space_toggles_same_pinned_file() {
+        let (mut a, cwd) = app_with_files();
+        a.hovered_path = Some(cwd.join("b.txt"));
+        a.space_preview(); // open
+        a.space_preview(); // same target → close
+        assert!(!a.settings.show_preview);
+        assert!(a.preview_pin.is_none());
+        a.space_preview(); // and reopens
+        assert!(a.settings.show_preview);
+    }
+
+    #[test]
+    fn space_falls_back_to_focused_then_selection() {
+        let (mut a, _cwd) = app_with_files();
+        {
+            let d = a.current_dir_mut().unwrap();
+            let s = d.snap.read().unwrap();
+            d.sel.select_row(&s, 1);
+        }
+        a.space_preview();
+        let expect = a.focused_path();
+        assert_eq!(a.preview_pin, expect);
+    }
+
+    #[test]
+    fn pin_drops_when_focus_moves() {
+        let (mut a, cwd) = app_with_files();
+        a.hovered_path = Some(cwd.join("b.txt"));
+        a.space_preview();
+        assert_eq!(a.preview_target(), Some(cwd.join("b.txt")));
+        // Focus moves to a.txt (click/arrow) → pin is stale, panel
+        // follows the real selection again.
+        a.hovered_path = None;
+        {
+            let d = a.current_dir_mut().unwrap();
+            let s = d.snap.read().unwrap();
+            d.sel.select_row(&s, 0);
+        }
+        assert_eq!(a.preview_target(), Some(cwd.join("a.txt")));
+        assert!(a.preview_pin.is_none());
+    }
+
+    #[test]
+    fn pin_outside_current_dir_is_ignored() {
+        let (mut a, _cwd) = app_with_files();
+        a.preview_pin = Some(PathBuf::from("/elsewhere/x.txt"));
+        assert_eq!(a.preview_target(), a.focused_path());
+        assert!(a.preview_pin.is_none());
     }
 }

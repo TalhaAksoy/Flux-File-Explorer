@@ -88,6 +88,13 @@ impl FluxApp {
             }
             return;
         }
+        // Space rising-edge state — tracked ahead of every guard so a
+        // key held through a dialog/text field can't produce a phantom
+        // edge (or a missed press) when focus comes back.
+        let space_down = ctx.input(|i| i.key_down(Key::Space));
+        let space_edge = space_down && !self.space_was_down;
+        self.space_was_down = space_down;
+
         if self.palette_open || !matches!(self.dialog, Dialog::None) {
             return; // dialogs own the keyboard
         }
@@ -125,6 +132,18 @@ impl FluxApp {
         }
         if ctx.egui_wants_keyboard_input() {
             return; // a text field is focused
+        }
+
+        // Space = preview the hovered (or focused) file. Terminal input
+        // is already drained, text fields returned above, dialogs and
+        // workspace tabs returned earlier — reaching here means the
+        // file list owns the keyboard. Key-repeat can't re-toggle:
+        // space_edge only fires on the physical press.
+        if space_edge
+            && self.dragging.is_none()
+            && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Space))
+        {
+            self.space_preview();
         }
 
         let cmd = egui::Modifiers::COMMAND;
@@ -692,6 +711,12 @@ impl eframe::App for FluxApp {
                 None
             } else {
                 let row_act = view::file_table(self, ui);
+                // Space-preview's hover resolution — pointer position
+                // alone, never a selection change.
+                self.hovered_path = row_act.hovered.and_then(|i| {
+                    self.current_dir()
+                        .and_then(|d| d.snap.read().unwrap().entry_path(i))
+                });
                 let had_row_ctx = row_act.context.is_some();
                 view::apply_click(self, &row_act);
                 if let Some(idx) = row_act.open {
@@ -1118,6 +1143,35 @@ impl eframe::App for FluxApp {
             }
             // Optional context-menu capture — open once the screen is
             // up so the menu renders for the final frames.
+            // Preview capture — pin the named file once its entry has
+            // enumerated, opening the details panel the way Space does.
+            if self
+                .shot
+                .as_ref()
+                .is_some_and(|s| s.preview_name.is_some() && !s.preview_done)
+            {
+                let want = self
+                    .shot
+                    .as_ref()
+                    .and_then(|s| s.preview_name.clone())
+                    .unwrap();
+                let found = self.current_dir().and_then(|d| {
+                    let s = d.snap.read().unwrap();
+                    (0..s.view_len()).find_map(|i| {
+                        s.row(i)
+                            .filter(|(_, e)| e.name.to_string_lossy() == want)
+                            .and_then(|(idx, _)| s.entry_path(idx))
+                    })
+                });
+                if let Some(p) = found {
+                    self.settings.show_preview = true;
+                    self.preview_pin = Some(p);
+                    self.pin_anchor = self.focused_path();
+                    if let Some(sc) = &mut self.shot {
+                        sc.preview_done = true;
+                    }
+                }
+            }
             let menu = self
                 .shot
                 .as_ref()
