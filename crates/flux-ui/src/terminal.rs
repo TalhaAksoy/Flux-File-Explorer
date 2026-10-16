@@ -43,6 +43,62 @@ impl EventListener for Proxy {
     }
 }
 
+/// Which quoting dialect the spawned shell understands for the "↓ cwd"
+/// command — detected once from the shell binary name at spawn.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ShellKind {
+    /// cmd.exe (Windows %COMSPEC% default).
+    Cmd,
+    /// powershell.exe / pwsh.
+    PowerShell,
+    /// POSIX-ish: sh, bash, zsh, fish, nushell — single-quote escaping.
+    Posix,
+}
+
+/// Classify a shell from its binary path/name.
+fn shell_kind(shell_path: &str) -> ShellKind {
+    let exe = Path::new(shell_path)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+    if exe.contains("powershell") || exe.contains("pwsh") {
+        ShellKind::PowerShell
+    } else if (exe.contains("sh") && !exe.contains("cmd")) || exe.starts_with("nu") {
+        // bash/zsh/fish/git-bash ("*sh*"), nushell ("nu", "nushell").
+        // Checked before "cmd" since nothing sane contains both.
+        ShellKind::Posix
+    } else if cfg!(windows) {
+        // cmd.exe and anything unrecognized under Windows.
+        ShellKind::Cmd
+    } else {
+        ShellKind::Posix
+    }
+}
+
+/// The `cd` line written to the PTY for `dir` — command text plus the
+/// trailing CR that submits it, quoted for `kind`.
+fn cd_command(kind: ShellKind, dir: &Path) -> String {
+    match kind {
+        // `cd /d` so a drive change applies too. Double quotes protect
+        // spaces and cmd metachars (`&`, `^`); `"` is not a legal Windows
+        // filename char, so no inner-quote escaping exists or is needed.
+        // Residual edge: a directory literally named like `a%TEMP%b` still
+        // undergoes cmd's %VAR% expansion — same limitation Explorer's own
+        // "open command window here" historically had.
+        ShellKind::Cmd => format!("cd /d \"{}\"\r", dir.display()),
+        // LiteralPath avoids glob/bracket interpretation; `'` → `''`.
+        ShellKind::PowerShell => format!(
+            "Set-Location -LiteralPath '{}'\r",
+            dir.display().to_string().replace('\'', "''")
+        ),
+        // POSIX single quotes, escaped as `'\''`.
+        ShellKind::Posix => format!(
+            "cd '{}'\r",
+            dir.display().to_string().replace('\'', "'\\''")
+        ),
+    }
+}
+
 /// A live embedded terminal session.
 pub struct EmbeddedTerm {
     term: Arc<Mutex<Term<Proxy>>>,
@@ -53,6 +109,8 @@ pub struct EmbeddedTerm {
     /// Directory the shell was spawned in — shown in the header and used
     /// by the "cd here" button.
     pub cwd: PathBuf,
+    /// Quoting dialect of the spawned shell, for `cd_to`.
+    shell_kind: ShellKind,
     /// Whether keystrokes go to the shell vs the app's shortcuts.
     pub focused: bool,
     exited: bool,
@@ -89,6 +147,7 @@ impl EmbeddedTerm {
         let writer = pair.master.take_writer().ok()?;
         drop(pair.slave);
 
+        let shell_kind = shell_kind(&shell);
         let (tx, rx) = mpsc::channel();
         let proxy = Proxy {
             tx,
@@ -129,6 +188,7 @@ impl EmbeddedTerm {
             child: Some(child),
             rx,
             cwd,
+            shell_kind,
             focused: true,
             exited: false,
             scroll_accum: 0.0,
@@ -182,10 +242,10 @@ impl EmbeddedTerm {
         });
     }
 
-    /// `cd` the running shell to `dir` — writes the command as if typed.
+    /// `cd` the running shell to `dir` — writes the command as if typed,
+    /// quoted for the shell we actually spawned (cmd/PowerShell/POSIX).
     fn cd_to(&mut self, dir: &Path) {
-        let escaped = dir.display().to_string().replace('\'', "'\\''");
-        self.input(format!("cd '{escaped}'\r").as_bytes());
+        self.input(cd_command(self.shell_kind, dir).as_bytes());
     }
 }
 
@@ -684,5 +744,53 @@ impl FluxApp {
         // keep a dragged height; without it the panel's content-min is
         // just the header and the drag snaps back on release.
         ui.take_available_space();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shell_kind_detects_common_shells() {
+        // COMSPEC/cmd classification only exists under Windows — on other
+        // OSes an unrecognized name is POSIX-ish by definition.
+        #[cfg(windows)]
+        {
+            assert_eq!(shell_kind("cmd.exe"), ShellKind::Cmd);
+            assert_eq!(shell_kind("C:\\Windows\\System32\\cmd.exe"), ShellKind::Cmd);
+            assert_eq!(shell_kind("powershell.exe"), ShellKind::PowerShell);
+            assert_eq!(
+                shell_kind("C:\\Program Files\\PowerShell\\7\\pwsh.exe"),
+                ShellKind::PowerShell
+            );
+        }
+        // Portable: these names classify the same on every OS (pwsh and
+        // nushell exist on Linux/macOS too).
+        assert_eq!(shell_kind("/bin/bash"), ShellKind::Posix);
+        assert_eq!(shell_kind("/bin/zsh"), ShellKind::Posix);
+        assert_eq!(shell_kind("nu.exe"), ShellKind::Posix);
+        assert_eq!(shell_kind("/usr/bin/nushell"), ShellKind::Posix);
+        assert_eq!(shell_kind("/usr/bin/pwsh"), ShellKind::PowerShell);
+    }
+
+    #[test]
+    fn cd_command_quotes_for_cmd() {
+        let c = cd_command(ShellKind::Cmd, Path::new("C:\\My Stuff\\docs"));
+        assert_eq!(c, "cd /d \"C:\\My Stuff\\docs\"\r");
+    }
+
+    #[test]
+    fn cd_command_quotes_for_powershell() {
+        let c = cd_command(ShellKind::PowerShell, Path::new("C:\\it's\\dir"));
+        assert_eq!(c, "Set-Location -LiteralPath 'C:\\it''s\\dir'\r");
+    }
+
+    #[test]
+    fn cd_command_quotes_for_posix() {
+        let c = cd_command(ShellKind::Posix, Path::new("/home/u/my dir"));
+        assert_eq!(c, "cd '/home/u/my dir'\r");
+        let q = cd_command(ShellKind::Posix, Path::new("/it's/here"));
+        assert_eq!(q, "cd '/it'\\''s/here'\r");
     }
 }

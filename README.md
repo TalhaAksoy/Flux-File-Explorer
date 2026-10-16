@@ -85,26 +85,64 @@ Copy throughput (APFS, clonefile-capable `fs::copy` path): 1.4 GiB/s on
   New Folder / New File / Paste / Sort By / Row Density / Refresh /
   Open Terminal Here / Properties; sidebar menu with Open / Open in New
   Tab / Remove from Sidebar
-- Compress to .zip on the ops engine (deflate, chunked + cancellable)
+- Compress to .zip on the ops engine — staged `*.fluxpart-*` write
+  published by rename only when complete; symlinks stored as links,
+  never followed; a cancel/failure never leaves a misleading archive
+- **Safe ZIP extraction** — `enclosed_name` zip-slip guard plus a
+  per-component symlink walk (writes can't escape through planted
+  links); "Extract to X/" is staged so cancel leaves no partial dir;
+  "Extract Here" merges with per-entry conflict resolution; symlink
+  entries are recreated on Unix, never written through
+- **View modes** — Details (classic table), Compact (names-only dense
+  list), Grid and Gallery icon cells, virtualized; persisted + keyboard
+  nav adapts to the grid's column count
+- **Preview panel** (Alt+P / status-bar toggle) — async worker decodes
+  bounded images and text snippets; stale results for a moved selection
+  are dropped; persisted setting
+- **Image thumbnails** — dedicated decode worker, bounded LRU (256),
+  pixel/allocation caps against decompression bombs; grid/gallery and
+  list rows show them inline
+- **Open With** — Linux resolves `.desktop` handlers via `xdg-mime`
+  (default marked); macOS lists installed app bundles; Windows calls
+  the system's own OpenWith dialog
+- **Opt-in folder sizes** — right-click "Calculate Folder Size" runs a
+  cancellable worker; symlinks are never recursed
+- **Undo/Redo** (Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y) — a journal inverts
+  cleanly-finished renames, batch renames, mkdir/create-file, duplicate
+  and compress ops (inverse = rename-back or trash-the-result)
+- **Operation history** — status-bar clock opens a session log of every
+  op with state + progress, plus a one-click Undo entry point
+- Windows hidden/system file attributes (`FILE_ATTRIBUTE_HIDDEN`,
+  `FILE_ATTRIBUTE_SYSTEM`) drive the hidden toggle; system files gate
+  behind a separate "protected OS files" setting
+- Column widths persist (debounced writes); embedded terminal `cd`
+  quoting handles cmd / PowerShell / POSIX shells
 
 ## Known limitations (honest list)
 
 - **Windows / Linux untested** — platform code is written (open, trash,
   volumes, watcher) but has only been run on macOS.
-- Directory sizes always show "—"; computing them needs a recursive scan,
-  which the spec forbids implicitly. (Planned: opt-in per-folder size.)
+- Undo covers only fully-invertible ops (renames, mkdir, create-file,
+  duplicate, compress). Copy/move aren't journaled — the post-conflict
+  destination set isn't recoverable from the op description alone.
+  Extract isn't undone (an "Extract Here" inverse could only trash the
+  parent dir). Trash and permanent delete are irreversible by nature.
+- Gallery mode is a large-cell icon grid — a filmstrip-style variant
+  with a big preview stage isn't implemented.
+- Linux "Open With" needs `xdg-utils` (`xdg-mime`) installed; Flatpak
+  exports are scanned, snap handlers aren't.
+- Thumbnails/previews decode the bundled `image` formats
+  (png/jpeg/gif/webp/bmp/ico); RAW, HEIC, AVIF and video aren't covered.
+- ZIP extraction recreates symlinks on Unix only; elsewhere they're
+  skipped with a noted error.
 - Copy engine uses `fs::copy` (APFS clonefile on macOS) and a chunked
   fallback; it does not yet use `copy_file_range`/`sendfile` special-cases
   on Linux or `CopyFile2` flags on Windows.
-- No undo for file operations yet.
 - Dragging files **out** to the OS is macOS/Windows-only (`drag` crate's
   Linux backend needs GTK, incompatible with winit). Icon fetching is
   macOS/Windows-only for the same reason; Linux shows painted glyphs.
 - Drag-out preview shows the item's own contents when it's an image file;
   other types may get a blank drag image on macOS.
-- Column widths don't persist yet.
-- No "Open With…" app picker or OS Share menu yet — both need platform
-  app enumeration; Open uses the default handler.
 - No accessibility-tree audit beyond what egui/accesskit provides.
 
 ## Notes

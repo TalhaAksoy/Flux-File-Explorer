@@ -55,6 +55,7 @@ fn footer(ui: &mut egui::Ui, primary: &str, primary_enabled: bool) -> (bool, boo
 
 /// Render all pending dialogs. Consumes `app.dialog` when a dialog closes.
 pub fn show(app: &mut FluxApp, ctx: &egui::Context) {
+    ops_log_window(app, ctx);
     // Take the dialog out so dialog bodies can call back into `app` freely.
     let mut dialog = std::mem::replace(&mut app.dialog, Dialog::None);
     let cur_dir = app.current_path();
@@ -346,6 +347,8 @@ pub fn show(app: &mut FluxApp, ctx: &egui::Context) {
                 ctx.set_fonts(crate::theme::load_fonts(&orig.ui_font, &orig.mono_font));
                 app.apply_ui_scale(ctx);
                 crate::theme::apply_theme(ctx, dark);
+                // Live-preferred view flags also revert.
+                app.set_show_system_files(orig.show_system_files);
             };
             if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
                 revert(app, ctx);
@@ -686,6 +689,60 @@ pub fn show(app: &mut FluxApp, ctx: &egui::Context) {
                                 true,
                                 "→ Pictures $ ls -l ~/Projects",
                             );
+
+                            // —— Files ——
+                            ui.add_space(6.0);
+                            section(ui, &pal, "FILES");
+                            let sys_label = if cfg!(windows) {
+                                "Show protected operating system files"
+                            } else {
+                                "Show protected operating system files (Windows)"
+                            };
+                            if ui
+                                .checkbox(&mut app.settings.show_system_files, sys_label)
+                                .changed()
+                            {
+                                let v = app.settings.show_system_files;
+                                app.set_show_system_files(v);
+                            }
+                            ui.label(
+                                egui::RichText::new(
+                                    "Files Windows marks as both hidden and system — shown \
+                                     dimmed, not recommended for everyday browsing.",
+                                )
+                                .color(pal.text_muted)
+                                .size(11.0),
+                            );
+                            ui.add_space(4.0);
+                            ui.checkbox(&mut app.settings.show_preview, "Preview panel");
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    egui::RichText::new("Default view")
+                                        .color(pal.text_secondary)
+                                        .size(13.0),
+                                );
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        for (label, mode) in [
+                                            ("Gallery", flux_settings::ViewMode::Gallery),
+                                            ("Grid", flux_settings::ViewMode::Grid),
+                                            ("Compact", flux_settings::ViewMode::Compact),
+                                            ("Details", flux_settings::ViewMode::List),
+                                        ] {
+                                            if ui
+                                                .selectable_label(
+                                                    app.settings.view_mode == mode,
+                                                    label,
+                                                )
+                                                .clicked()
+                                            {
+                                                app.settings.view_mode = mode;
+                                            }
+                                        }
+                                    },
+                                );
+                            });
 
                             // —— Appearance ——
                             ui.add_space(6.0);
@@ -1083,6 +1140,39 @@ pub fn row_context_menu(app: &mut FluxApp, ui: &mut egui::Ui, items: &[PathBuf])
             let _ = flux_platform::open_in_terminal(&p);
         }
     }
+    #[cfg(windows)]
+    if single && first.as_ref().is_some_and(|p| p.is_file()) && m::item(ui, "Open With…").clicked()
+    {
+        ui.close();
+        if let Some(p) = first.clone()
+            && let Err(e) = flux_platform::open_with_dialog(&p)
+        {
+            app.toast(format!("Open With failed: {e}"));
+        }
+    }
+    #[cfg(not(windows))]
+    if single && first.as_ref().is_some_and(|p| p.is_file()) {
+        let target = first.clone().unwrap();
+        let apps = app.open_with_apps(&target);
+        m::submenu(ui, "Open With", |ui| {
+            if apps.is_empty() {
+                ui.weak("No applications found");
+            }
+            for a in &apps {
+                let label = if a.is_default {
+                    format!("{} (default)", a.name)
+                } else {
+                    a.name.clone()
+                };
+                if m::item(ui, &label).clicked() {
+                    ui.close();
+                    if let Err(e) = flux_platform::open_with(&target, a) {
+                        app.toast(format!("Could not open with {}: {e}", a.name));
+                    }
+                }
+            }
+        });
+    }
     if single && m::item(ui, "Reveal in File Manager").clicked() {
         ui.close();
         if let Some(p) = first.clone() {
@@ -1123,6 +1213,55 @@ pub fn row_context_menu(app: &mut FluxApp, ui: &mut egui::Ui, items: &[PathBuf])
     if m::item(ui, "Compress to .zip").clicked() {
         ui.close();
         app.compress_items(items.to_vec());
+    }
+    // Single .zip → safe extraction (zip-slip guarded, staged when the
+    // target dir is new).
+    let single_zip = single
+        && first.as_ref().is_some_and(|p| {
+            p.is_file()
+                && p.extension()
+                    .and_then(|e| e.to_str())
+                    .is_some_and(|e| e.eq_ignore_ascii_case("zip"))
+        });
+    if single_zip {
+        let archive = first.clone().unwrap();
+        let parent = archive
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_default();
+        let stem = archive
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "extracted".into());
+        let label = format!("Extract to \"{stem}/\"");
+        if m::item(ui, &label).clicked() {
+            ui.close();
+            // Reserve a free sibling dir name; extract still guards races.
+            let mut dest = parent.join(&stem);
+            for n in 2..1000 {
+                if !dest.exists() {
+                    break;
+                }
+                dest = parent.join(format!("{stem} {n}"));
+            }
+            app.extract_archive(archive.clone(), dest);
+        }
+        if m::item(ui, "Extract Here").clicked() {
+            ui.close();
+            app.extract_archive(archive.clone(), parent);
+        }
+    }
+    // Opt-in recursive folder sizes — Dolphin/Explorer-Properties style.
+    // Only real dirs qualify (symlinked dirs show their link, not the
+    // target's content).
+    let has_real_dir = items.iter().any(|p| {
+        std::fs::symlink_metadata(p)
+            .map(|m| m.is_dir() && !m.file_type().is_symlink())
+            .unwrap_or(false)
+    });
+    if has_real_dir && m::item(ui, "Calculate Folder Size").clicked() {
+        ui.close();
+        app.calculate_dir_sizes(items);
     }
     m::sep(ui);
     let rename_sc = if single { "F2" } else { "" };
@@ -1257,6 +1396,20 @@ pub fn bg_context_menu(app: &mut FluxApp, ui: &mut egui::Ui) {
             app.set_sort(s);
         }
     });
+    let cur_mode = app.settings.view_mode;
+    m::submenu(ui, "View", |ui| {
+        for (label, mode) in [
+            ("Details", flux_settings::ViewMode::List),
+            ("Compact List", flux_settings::ViewMode::Compact),
+            ("Grid", flux_settings::ViewMode::Grid),
+            ("Gallery", flux_settings::ViewMode::Gallery),
+        ] {
+            if m::item_check(ui, label, cur_mode == mode).clicked() {
+                ui.close();
+                app.set_view_mode(mode);
+            }
+        }
+    });
     let cur_density = app.density;
     m::submenu(ui, "Row Density", |ui| {
         for (label, d) in [
@@ -1287,5 +1440,87 @@ pub fn bg_context_menu(app: &mut FluxApp, ui: &mut egui::Ui) {
             path: app.current_path(),
             meta: None,
         };
+    }
+}
+
+/// Operation-history window: every op this session (newest first), with
+/// live progress for running ones and a state badge for finished ones.
+/// Toggled from the status bar; Esc/close button dismisses.
+fn ops_log_window(app: &mut FluxApp, ctx: &egui::Context) {
+    if !app.show_ops_log {
+        return;
+    }
+    let mut open = true;
+    egui::Window::new("Operations")
+        .open(&mut open)
+        .default_width(430.0)
+        .resizable(true)
+        .collapsible(false)
+        .show(ctx, |ui| {
+            let ops = app.ops.all_ops();
+            if ops.is_empty() {
+                ui.weak("No operations yet this session.");
+                return;
+            }
+            if !app.undo_stack.is_empty()
+                && ui
+                    .button(format!("Undo: {}", app.undo_stack.last().unwrap().label))
+                    .clicked()
+            {
+                app.undo();
+            }
+            ui.add_space(4.0);
+            egui::ScrollArea::vertical()
+                .max_height(320.0)
+                .auto_shrink([false, true])
+                .show(ui, |ui| {
+                    for op in ops.iter().rev() {
+                        let p = op.progress_snapshot();
+                        ui.horizontal(|ui| {
+                            let (badge, col) = match &p.state {
+                                flux_operations::OpState::Queued
+                                | flux_operations::OpState::Discovering
+                                | flux_operations::OpState::Running => {
+                                    ("▶", ui.visuals().text_color())
+                                }
+                                flux_operations::OpState::WaitingConflict => {
+                                    ("?", ui.visuals().warn_fg_color)
+                                }
+                                flux_operations::OpState::Done => {
+                                    ("✓", egui::Color32::from_rgb(90, 170, 90))
+                                }
+                                flux_operations::OpState::DoneWithErrors => {
+                                    ("!", egui::Color32::from_rgb(220, 160, 60))
+                                }
+                                flux_operations::OpState::Cancelled => {
+                                    ("✕", ui.visuals().weak_text_color())
+                                }
+                                flux_operations::OpState::Failed(_) => {
+                                    ("✕", egui::Color32::from_rgb(220, 90, 90))
+                                }
+                            };
+                            ui.label(egui::RichText::new(badge).color(col).monospace());
+                            ui.label(&op.label);
+                            if p.state.is_active()
+                                && let Some(frac) = p.fraction()
+                            {
+                                ui.weak(format!("{:.0}%", frac * 100.0));
+                            }
+                            if let flux_operations::OpState::Failed(m) = &p.state {
+                                ui.weak(m);
+                            }
+                        });
+                        if p.error_count > 0
+                            && let Some(e) = p.errors.first()
+                        {
+                            ui.indent(op.id as usize, |ui| {
+                                ui.label(egui::RichText::new(e).weak().small());
+                            });
+                        }
+                    }
+                });
+        });
+    if !open {
+        app.show_ops_log = false;
     }
 }

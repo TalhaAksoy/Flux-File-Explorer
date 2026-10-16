@@ -20,6 +20,7 @@ fn make_entries(n: usize) -> Vec<DirEntry> {
             mtime: Some(SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(i as u64)),
             readonly: false,
             hidden: false,
+            system: false,
         })
         .collect()
 }
@@ -30,7 +31,7 @@ fn bench_view(c: &mut Criterion) {
     for n in [10_000usize, 100_000] {
         let entries = make_entries(n);
         group.bench_with_input(BenchmarkId::from_parameter(n), &entries, |b, entries| {
-            b.iter(|| build_view(entries, &spec, None, false));
+            b.iter(|| build_view(entries, &spec, None, false, false));
         });
     }
     group.finish();

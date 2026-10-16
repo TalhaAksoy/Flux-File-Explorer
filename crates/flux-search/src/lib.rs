@@ -184,7 +184,9 @@ fn run_search(job: &Job, ev_tx: &mpsc::SyncSender<SearchEvent>, cur_gen: &Arc<At
                 return;
             }
             let name = e.file_name();
-            let hidden = name.as_encoded_bytes().first() == Some(&b'.');
+            // Leading dot OR Windows FILE_ATTRIBUTE_HIDDEN — attribute
+            // bits come free with the dirent on Windows.
+            let hidden = flux_core::entry::is_hidden(&name, flux_core::entry::dirent_attr_bits(&e));
             if hidden && !q.include_hidden {
                 continue;
             }

@@ -5,12 +5,14 @@
 //! worker that builds sorted/filtered views of the snapshot off the UI thread.
 
 pub mod compute;
+pub mod dirsize;
 pub mod entry;
 pub mod enumerate;
 pub mod snapshot;
 pub mod sort;
 
 pub use compute::{ComputeEngine, ComputeEvent, ViewRequest};
+pub use dirsize::{SizeEngine, SizeEvent};
 pub use entry::{DirEntry, EntryKind};
 pub use enumerate::{EnumEngine, EnumEvent, MetaEngine, MetaEvent};
 pub use snapshot::{DirSnapshot, LoadState, SnapshotHandle};

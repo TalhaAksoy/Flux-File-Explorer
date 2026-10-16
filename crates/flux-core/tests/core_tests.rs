@@ -17,6 +17,7 @@ fn entry(name: &str, kind: EntryKind, size: u64) -> DirEntry {
         mtime: None,
         readonly: false,
         hidden: is_hidden_name(&OsString::from(name)),
+        system: false,
     }
 }
 
@@ -70,7 +71,7 @@ fn build_view_sorts_dirs_first_then_natural_names() {
         entry("aDir", EntryKind::Dir, UNKNOWN_SIZE),
         entry(".hidden", EntryKind::File, 1),
     ];
-    let view = build_view(&entries, &SortSpec::default(), None, false);
+    let view = build_view(&entries, &SortSpec::default(), None, false, false);
     let got: Vec<&str> = view
         .iter()
         .map(|&i| entries[i as usize].name.to_str().unwrap())
@@ -84,10 +85,55 @@ fn build_view_hides_hidden_entries_until_enabled() {
         entry(".secret", EntryKind::File, 1),
         entry("visible", EntryKind::File, 1),
     ];
-    let hidden_off = build_view(&entries, &SortSpec::default(), None, false);
-    let hidden_on = build_view(&entries, &SortSpec::default(), None, true);
+    let hidden_off = build_view(&entries, &SortSpec::default(), None, false, false);
+    let hidden_on = build_view(&entries, &SortSpec::default(), None, true, false);
     assert_eq!(hidden_off.len(), 1);
     assert_eq!(hidden_on.len(), 2);
+}
+
+#[test]
+fn build_view_gates_system_files_behind_stronger_toggle() {
+    // Explorer semantics: hidden+system ("protected OS files") stay hidden
+    // even when show_hidden is on — they need the separate system toggle.
+    let mut protected = entry(".boot", EntryKind::File, 1);
+    protected.system = true;
+    let mut system_only = entry("driver.sys", EntryKind::File, 1);
+    system_only.system = true; // not hidden → visible like any other file
+    let entries = vec![
+        entry(".plain_hidden", EntryKind::File, 1),
+        protected,
+        system_only,
+        entry("normal.txt", EntryKind::File, 1),
+    ];
+    let spec = SortSpec::default();
+    let names_of = |view: &[u32]| -> Vec<String> {
+        view.iter()
+            .map(|&i| entries[i as usize].name.to_string_lossy().into_owned())
+            .collect()
+    };
+
+    let v = build_view(&entries, &spec, None, false, false);
+    assert_eq!(names_of(&v), ["driver.sys", "normal.txt"]);
+
+    // show_hidden alone reveals dotfiles but NOT protected files.
+    let v = build_view(&entries, &spec, None, true, false);
+    assert_eq!(names_of(&v), [".plain_hidden", "driver.sys", "normal.txt"]);
+
+    // show_system reveals protected files even without show_hidden.
+    let v = build_view(&entries, &spec, None, false, true);
+    assert_eq!(names_of(&v), [".boot", "driver.sys", "normal.txt"]);
+}
+
+#[test]
+fn is_hidden_flags_attr_or_dot_name() {
+    use flux_core::entry::{ATTR_HIDDEN, is_hidden};
+    use std::ffi::OsStr;
+    assert!(is_hidden(OsStr::new("pagefile.sys"), ATTR_HIDDEN));
+    assert!(is_hidden(OsStr::new(".git"), 0));
+    assert!(!is_hidden(OsStr::new("plain.txt"), 0));
+    // SYSTEM alone does not hide (Explorer shows non-hidden system files).
+    use flux_core::entry::ATTR_SYSTEM;
+    assert!(!is_hidden(OsStr::new("plain.txt"), ATTR_SYSTEM));
 }
 
 #[test]
@@ -102,7 +148,7 @@ fn build_view_filters_and_sorts_by_size() {
         dir: SortDir::Desc,
         ..SortSpec::default()
     };
-    let view = build_view(&entries, &spec, Some(".log"), false);
+    let view = build_view(&entries, &spec, Some(".log"), false, false);
     let got: Vec<&str> = view
         .iter()
         .map(|&i| entries[i as usize].name.to_str().unwrap())
@@ -135,7 +181,7 @@ fn sort_by_modified_desc() {
         dirs_first: false,
         ..SortSpec::default()
     };
-    let view = build_view(&entries, &spec, None, false);
+    let view = build_view(&entries, &spec, None, false, false);
     let got: Vec<&str> = view
         .iter()
         .map(|&i| entries[i as usize].name.to_str().unwrap())

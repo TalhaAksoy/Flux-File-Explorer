@@ -457,4 +457,310 @@ fn compress_creates_valid_zip() {
         .read_to_string(&mut s)
         .unwrap();
     assert_eq!(s, "inner-data");
+    // Staging is transient — no .fluxpart-* litter next to the output.
+    let leftovers: Vec<_> = std::fs::read_dir(&dir)
+        .unwrap()
+        .flatten()
+        .filter(|e| e.file_name().to_string_lossy().contains(".fluxpart-"))
+        .collect();
+    assert!(leftovers.is_empty(), "staging files left: {leftovers:?}");
+}
+
+#[test]
+fn compress_cancel_publishes_nothing() {
+    let (_t, dir) = tmp();
+    write_file(&dir, "a.txt", b"hello");
+    let dest = dir.join("out.zip");
+    let progress = Mutex::new(OpProgress::default());
+    let cancel = AtomicBool::new(true); // cancelled before the first byte
+    let ctx = noop_ctx(&progress, &cancel);
+    flux_operations::archive::compress_items(&[dir.join("a.txt")], &dest, &ctx).unwrap();
+    assert!(!dest.exists(), "cancelled compress must not publish dest");
+    let leftovers: Vec<_> = std::fs::read_dir(&dir)
+        .unwrap()
+        .flatten()
+        .filter(|e| e.file_name().to_string_lossy().contains(".fluxpart-"))
+        .collect();
+    assert!(leftovers.is_empty(), "staging files left: {leftovers:?}");
+}
+
+#[test]
+fn compress_replaces_existing_zip_after_full_write() {
+    let (_t, dir) = tmp();
+    write_file(&dir, "new.txt", b"new-data");
+    let dest = dir.join("out.zip");
+    // Pre-existing "old" archive must survive until the new one is
+    // complete — and be replaced wholesale on success.
+    write_file(&dir, "out.zip", b"not-a-zip-yet");
+    let progress = Mutex::new(OpProgress::default());
+    let cancel = AtomicBool::new(false);
+    let ctx = noop_ctx(&progress, &cancel);
+    flux_operations::archive::compress_items(&[dir.join("new.txt")], &dest, &ctx).unwrap();
+    let mut za = zip::ZipArchive::new(std::fs::File::open(&dest).unwrap()).unwrap();
+    assert!(za.by_name("new.txt").is_ok());
+}
+
+#[cfg(unix)]
+#[test]
+fn compress_stores_symlink_as_link_not_content() {
+    let (_t, dir) = tmp();
+    write_file(&dir, "real.txt", b"real-data");
+    std::os::unix::fs::symlink("real.txt", dir.join("link.txt")).unwrap();
+    // A link pointing OUTSIDE the selection must not leak its content.
+    let (_t2, outdir) = tmp();
+    let outside = outdir.join("secret.txt");
+    std::fs::write(&outside, b"do-not-bundle").unwrap();
+    std::os::unix::fs::symlink(&outside, dir.join("escape.txt")).unwrap();
+    let dest = dir.join("out.zip");
+    let progress = Mutex::new(OpProgress::default());
+    let cancel = AtomicBool::new(false);
+    let ctx = noop_ctx(&progress, &cancel);
+    flux_operations::archive::compress_items(
+        &[
+            dir.join("real.txt"),
+            dir.join("link.txt"),
+            dir.join("escape.txt"),
+        ],
+        &dest,
+        &ctx,
+    )
+    .unwrap();
+    let mut za = zip::ZipArchive::new(std::fs::File::open(&dest).unwrap()).unwrap();
+    use std::io::Read as _;
+    // Symlink entry: mode bits say link, payload is the target path —
+    // not the target's bytes.
+    let (mode, target) = {
+        let mut entry = za.by_name("link.txt").unwrap();
+        let mut t = String::new();
+        entry.read_to_string(&mut t).unwrap();
+        (entry.unix_mode().unwrap_or(0), t)
+    };
+    assert_eq!(mode & 0o170000, 0o120000, "link.txt should be a symlink");
+    assert_eq!(target, "real.txt");
+    let mut payload = String::new();
+    za.by_name("escape.txt")
+        .unwrap()
+        .read_to_string(&mut payload)
+        .unwrap();
+    assert_eq!(payload, outside.to_string_lossy());
+    assert!(!payload.contains("do-not-bundle"));
+}
+
+// ---------- ops safety audit regressions ----------
+
+#[cfg(unix)]
+#[test]
+fn copy_symlink_overwrite_replaces_existing_dest() {
+    // Previously the link creation hit the occupied name and errored even
+    // with an Overwrite answer — now it stages + backup-swaps like files.
+    let (_t, dir) = tmp();
+    write_file(&dir, "target.txt", b"t");
+    std::os::unix::fs::symlink("target.txt", dir.join("link")).unwrap();
+    let destdir = dir.join("dst");
+    std::fs::create_dir(&destdir).unwrap();
+    write_file(&destdir, "link", b"preexisting");
+    let progress = Mutex::new(OpProgress::default());
+    let cancel = AtomicBool::new(false);
+    let ctx = noop_ctx(&progress, &cancel); // resolver answers Overwrite
+    let r = copy_tree(&dir.join("link"), &destdir.join("link"), &ctx).unwrap();
+    assert_eq!(r, flux_operations::copy::ItemOutcome::Done);
+    let dst = destdir.join("link");
+    let md = std::fs::symlink_metadata(&dst).unwrap();
+    assert!(md.file_type().is_symlink(), "dest should be a symlink now");
+    assert_eq!(
+        std::fs::read_link(&dst).unwrap(),
+        PathBuf::from("target.txt")
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn copy_symlink_does_not_follow_link() {
+    // The link itself is copied — the target's content must not be
+    // duplicated into a real file at the destination.
+    let (_t, dir) = tmp();
+    write_file(&dir, "real.txt", b"real");
+    std::os::unix::fs::symlink("real.txt", dir.join("alias")).unwrap();
+    let dst = dir.join("out");
+    let progress = Mutex::new(OpProgress::default());
+    let cancel = AtomicBool::new(false);
+    let ctx = noop_ctx(&progress, &cancel);
+    let r = copy_tree(&dir.join("alias"), &dst, &ctx).unwrap();
+    assert_eq!(r, flux_operations::copy::ItemOutcome::Done);
+    assert!(
+        std::fs::symlink_metadata(&dst)
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+}
+
+#[test]
+fn remove_tree_deletes_readonly_files() {
+    // POSIX deletes readonly files outright (dir perms govern); on
+    // Windows remove_file_force clears the attribute first — either way
+    // the file must go when the user asked for a permanent delete.
+    let (_t, dir) = tmp();
+    let p = write_file(&dir, "ro.txt", b"ro");
+    let mut perms = std::fs::metadata(&p).unwrap().permissions();
+    perms.set_readonly(true);
+    std::fs::set_permissions(&p, perms).unwrap();
+    let progress = Mutex::new(OpProgress::default());
+    let cancel = AtomicBool::new(false);
+    let ctx = noop_ctx(&progress, &cancel);
+    flux_operations::copy::remove_tree(&p, &ctx).unwrap();
+    assert!(!p.exists());
+}
+
+// ---------- extract ----------
+
+#[test]
+fn extract_to_new_dir_roundtrip() {
+    let (_t, dir) = tmp();
+    write_file(&dir, "a.txt", b"hello");
+    let sub = dir.join("docs");
+    std::fs::create_dir(&sub).unwrap();
+    write_file(&sub, "inner.txt", b"inner-data");
+    let zip_path = dir.join("src.zip");
+    let progress = Mutex::new(OpProgress::default());
+    let cancel = AtomicBool::new(false);
+    let ctx = noop_ctx(&progress, &cancel);
+    flux_operations::archive::compress_items(&[dir.join("a.txt"), sub.clone()], &zip_path, &ctx)
+        .unwrap();
+
+    let dest = dir.join("outdir");
+    flux_operations::archive::extract_archive(&zip_path, &dest, &ctx).unwrap();
+    assert_eq!(std::fs::read(dest.join("a.txt")).unwrap(), b"hello");
+    assert_eq!(
+        std::fs::read(dest.join("docs/inner.txt")).unwrap(),
+        b"inner-data"
+    );
+    // Staged dir published by rename — no .fluxpart-* dirs left behind.
+    let leftovers: Vec<_> = std::fs::read_dir(&dir)
+        .unwrap()
+        .flatten()
+        .filter(|e| e.file_name().to_string_lossy().contains(".fluxpart-"))
+        .collect();
+    assert!(leftovers.is_empty(), "staging dirs left: {leftovers:?}");
+}
+
+#[test]
+fn extract_rejects_zip_slip() {
+    let (_t, dir) = tmp();
+    let zip_path = dir.join("evil.zip");
+    {
+        let f = std::fs::File::create(&zip_path).unwrap();
+        let mut zw = zip::ZipWriter::new(f);
+        let opts = zip::write::SimpleFileOptions::default();
+        zw.start_file("../escape.txt", opts).unwrap();
+        use std::io::Write as _;
+        zw.write_all(b"pwned").unwrap();
+        zw.start_file("ok.txt", opts).unwrap();
+        zw.write_all(b"fine").unwrap();
+        zw.finish().unwrap();
+    }
+    let dest = dir.join("outdir");
+    let progress = Mutex::new(OpProgress::default());
+    let cancel = AtomicBool::new(false);
+    let ctx = noop_ctx(&progress, &cancel);
+    flux_operations::archive::extract_archive(&zip_path, &dest, &ctx).unwrap();
+    assert!(!dir.join("escape.txt").exists(), "zip-slip entry escaped");
+    assert_eq!(std::fs::read(dest.join("ok.txt")).unwrap(), b"fine");
+    let p = progress.lock().unwrap();
+    assert!(p.errors.iter().any(|e| e.contains("unsafe path")));
+}
+
+#[cfg(unix)]
+#[test]
+fn extract_does_not_write_through_symlink() {
+    // Crafted archive: symlink "x -> <outside>" followed by "x/escape.txt".
+    // The second entry must be rejected by the ancestor check, not written
+    // through the link into the outside dir.
+    let (_t, dir) = tmp();
+    let (_t2, outside_dir) = tmp();
+    let zip_path = dir.join("craft.zip");
+    {
+        let f = std::fs::File::create(&zip_path).unwrap();
+        let mut zw = zip::ZipWriter::new(f);
+        let opts = zip::write::SimpleFileOptions::default();
+        zw.add_symlink("x", outside_dir.to_string_lossy().as_ref(), opts)
+            .unwrap();
+        zw.start_file("x/escape.txt", opts).unwrap();
+        use std::io::Write as _;
+        zw.write_all(b"pwned").unwrap();
+        zw.finish().unwrap();
+    }
+    let dest = dir.join("outdir");
+    let progress = Mutex::new(OpProgress::default());
+    let cancel = AtomicBool::new(false);
+    let ctx = noop_ctx(&progress, &cancel);
+    flux_operations::archive::extract_archive(&zip_path, &dest, &ctx).unwrap();
+    assert!(
+        !outside_dir.join("escape.txt").exists(),
+        "write escaped through symlink"
+    );
+    assert!(!dest.join("x/escape.txt").exists());
+    let p = progress.lock().unwrap();
+    assert!(
+        p.errors.iter().any(|e| e.contains("symlink")),
+        "errors: {:?}",
+        p.errors
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn extract_recreates_symlinks_safely() {
+    let (_t, dir) = tmp();
+    write_file(&dir, "real.txt", b"real-data");
+    let zip_path = dir.join("links.zip");
+    {
+        let f = std::fs::File::create(&zip_path).unwrap();
+        let mut zw = zip::ZipWriter::new(f);
+        let opts = zip::write::SimpleFileOptions::default();
+        zw.start_file("real.txt", opts).unwrap();
+        use std::io::Write as _;
+        zw.write_all(b"real-data").unwrap();
+        zw.add_symlink("link.txt", "real.txt", opts).unwrap();
+        zw.finish().unwrap();
+    }
+    let dest = dir.join("outdir");
+    let progress = Mutex::new(OpProgress::default());
+    let cancel = AtomicBool::new(false);
+    let ctx = noop_ctx(&progress, &cancel);
+    flux_operations::archive::extract_archive(&zip_path, &dest, &ctx).unwrap();
+    let md = std::fs::symlink_metadata(dest.join("link.txt")).unwrap();
+    assert!(md.file_type().is_symlink());
+    assert_eq!(
+        std::fs::read_link(dest.join("link.txt")).unwrap(),
+        PathBuf::from("real.txt")
+    );
+    // And reads resolve to the in-tree target.
+    assert_eq!(std::fs::read(dest.join("link.txt")).unwrap(), b"real-data");
+}
+
+#[test]
+fn extract_cancel_leaves_nothing() {
+    let (_t, dir) = tmp();
+    write_file(&dir, "a.txt", b"data");
+    let zip_path = dir.join("src.zip");
+    let progress = Mutex::new(OpProgress::default());
+    let cancel = AtomicBool::new(false);
+    let ctx = noop_ctx(&progress, &cancel);
+    flux_operations::archive::compress_items(&[dir.join("a.txt")], &zip_path, &ctx).unwrap();
+
+    let dest = dir.join("outdir");
+    let cancel2 = AtomicBool::new(true); // cancelled before extraction
+    let ctx2 = noop_ctx(&progress, &cancel2);
+    flux_operations::archive::extract_archive(&zip_path, &dest, &ctx2).unwrap();
+    assert!(
+        !dest.exists(),
+        "cancelled extract must not publish dest dir"
+    );
+    let leftovers: Vec<_> = std::fs::read_dir(&dir)
+        .unwrap()
+        .flatten()
+        .filter(|e| e.file_name().to_string_lossy().contains(".fluxpart-"))
+        .collect();
+    assert!(leftovers.is_empty(), "staging dirs left: {leftovers:?}");
 }
