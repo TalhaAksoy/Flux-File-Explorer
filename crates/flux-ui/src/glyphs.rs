@@ -15,6 +15,8 @@ pub enum Glyph {
     Close,
     /// Volume / drive.
     Disk,
+    /// Shell prompt (❯_) — embedded terminal.
+    Terminal,
 }
 
 /// Draw `g` centered inside `rect` with the given color.
@@ -110,6 +112,19 @@ pub fn paint_glyph(p: &egui::Painter, rect: Rect, g: Glyph, color: Color32) {
                 Pos2::new(body.right() - r * 0.32, body.top() + r * 0.28),
                 w * 0.7,
                 color,
+            );
+        }
+        Glyph::Terminal => {
+            // ❯_ — chevron at left, underscore prompt at lower right.
+            let tip = Pos2::new(c.x - r * 0.05, c.y - r * 0.15);
+            p.line_segment([Pos2::new(c.x - r * 0.6, c.y - r * 0.7), tip], st);
+            p.line_segment([tip, Pos2::new(c.x - r * 0.6, c.y + r * 0.4)], st);
+            p.line_segment(
+                [
+                    Pos2::new(c.x + r * 0.05, c.y + r * 0.55),
+                    Pos2::new(c.x + r * 0.6, c.y + r * 0.55),
+                ],
+                st,
             );
         }
     }

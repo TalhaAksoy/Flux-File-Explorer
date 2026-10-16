@@ -709,62 +709,7 @@ pub fn status_bar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) 
         }
         if let Some(fs) = app.free_space {
             dot(ui);
-            // Code-editor style: the free-space chip is functional —
-            // clicking it opens a terminal in the current directory.
-            let text = format!("{} free", format_size(fs.available));
-            let font = egui::FontId::proportional(11.5);
-            let w = ui
-                .painter()
-                .layout_no_wrap(text.clone(), font.clone(), pal.text_secondary)
-                .rect
-                .width();
-            let (rect, resp) =
-                ui.allocate_exact_size(egui::Vec2::new(w + 26.0, 20.0), egui::Sense::click());
-            if resp.hovered() {
-                ui.painter().rect_filled(
-                    rect.shrink2(egui::vec2(1.0, 1.0)),
-                    egui::CornerRadius::same(5),
-                    pal.surface_hover,
-                );
-            }
-            ui.painter().text(
-                egui::pos2(rect.left() + 7.0, rect.center().y),
-                egui::Align2::LEFT_CENTER,
-                "❯",
-                font.clone(),
-                if resp.hovered() {
-                    pal.accent
-                } else {
-                    pal.text_muted
-                },
-            );
-            ui.painter().text(
-                egui::pos2(rect.left() + 18.0, rect.center().y),
-                egui::Align2::LEFT_CENTER,
-                text,
-                font,
-                if resp.hovered() {
-                    pal.text_primary
-                } else {
-                    pal.text_secondary
-                },
-            );
-            let resp = resp.on_hover_text(if app.terminal.is_some() {
-                "Close terminal panel"
-            } else {
-                "Open terminal panel"
-            });
-            if resp.clicked() {
-                if app.terminal.is_some() {
-                    app.terminal = None;
-                } else {
-                    let dir = app.current_path();
-                    match crate::terminal::EmbeddedTerm::spawn(dir, &ui.ctx().clone()) {
-                        Some(t) => app.terminal = Some(t),
-                        None => app.toast("Could not open a terminal".to_string()),
-                    }
-                }
-            }
+            quiet(ui, format!("{} free", format_size(fs.available)));
         }
         // Toast.
         if let Some((msg, t)) = &app.status_msg
@@ -778,8 +723,26 @@ pub fn status_bar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) 
                     .size(11.5),
             );
         }
-        // Active op progress on the right.
+        // Right side: tool buttons, then active-op progress to their left.
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if glyphs::icon_toggle(
+                ui,
+                glyphs::Glyph::Terminal,
+                "Toggle terminal panel",
+                app.terminal.is_some(),
+            )
+            .clicked()
+            {
+                if app.terminal.is_some() {
+                    app.terminal = None;
+                } else {
+                    let dir = app.current_path();
+                    match crate::terminal::EmbeddedTerm::spawn(dir, &ui.ctx().clone()) {
+                        Some(t) => app.terminal = Some(t),
+                        None => app.toast("Could not open a terminal".to_string()),
+                    }
+                }
+            }
             for op in app.ops.active_ops() {
                 let p = op.progress_snapshot();
                 let frac = p.fraction();
