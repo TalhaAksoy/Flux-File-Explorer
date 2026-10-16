@@ -1002,6 +1002,7 @@ pub fn run(start_dir: Option<PathBuf>) -> eframe::Result<()> {
                 &app.settings.ui_font,
                 &app.settings.mono_font,
             ));
+            crate::theme::prewarm_font_scan();
             cc.egui_ctx.set_zoom_factor(app.settings.ui_scale);
             // Zoom shrinks the logical space — re-issue the requested
             // logical size so the physical window grows to match.

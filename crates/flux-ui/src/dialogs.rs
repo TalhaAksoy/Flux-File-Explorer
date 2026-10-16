@@ -365,6 +365,9 @@ pub fn show(app: &mut FluxApp, ctx: &egui::Context) {
                             // —— Fonts ——
                             section(ui, &pal, "FONTS");
                             let mut fonts_changed = false;
+                            let mono_list = |l: &'static [crate::theme::FontChoice]| {
+                                std::ptr::eq(l, crate::theme::MONO_FONTS)
+                            };
                             let font_row =
                                 |ui: &mut egui::Ui,
                                  label: &str,
@@ -381,30 +384,104 @@ pub fn show(app: &mut FluxApp, ctx: &egui::Context) {
                                             egui::Layout::right_to_left(egui::Align::Center),
                                             |ui| {
                                                 let flags = crate::theme::installed_fonts(list);
-                                                let cur = list
-                                                    .iter()
-                                                    .position(|c| c.key == *key)
-                                                    .map(|i| {
-                                                        if flags[i].1 {
-                                                            list[i].label.to_string()
-                                                        } else {
-                                                            format!(
-                                                                "{} (not installed)",
-                                                                list[i].label
-                                                            )
-                                                        }
-                                                    })
-                                                    .unwrap_or_else(|| list[0].label.to_string());
+                                                let cur = if let Some(rest) =
+                                                    key.strip_prefix("sys:")
+                                                {
+                                                    crate::theme::system_fonts(mono_list(list))
+                                                        .iter()
+                                                        .find(|f| {
+                                                            f.path == std::path::Path::new(rest)
+                                                        })
+                                                        .map(|f| f.label.clone())
+                                                        .unwrap_or_else(|| {
+                                                            std::path::Path::new(rest)
+                                                                .file_stem()
+                                                                .map(|s| {
+                                                                    s.to_string_lossy().to_string()
+                                                                })
+                                                                .unwrap_or_else(|| "Custom".into())
+                                                        })
+                                                } else {
+                                                    list.iter()
+                                                        .position(|c| c.key == *key)
+                                                        .map(|i| {
+                                                            if flags[i].1 {
+                                                                list[i].label.to_string()
+                                                            } else {
+                                                                format!(
+                                                                    "{} (not installed)",
+                                                                    list[i].label
+                                                                )
+                                                            }
+                                                        })
+                                                        .unwrap_or_else(|| {
+                                                            list[0].label.to_string()
+                                                        })
+                                                };
                                                 egui::ComboBox::from_id_salt(label)
                                                     .width(210.0)
                                                     .selected_text(
                                                         egui::RichText::new(cur).size(13.0),
                                                     )
                                                     .show_ui(ui, |ui| {
+                                                        let group =
+                                                            |ui: &mut egui::Ui, text: &str| {
+                                                                ui.add_space(4.0);
+                                                                ui.label(
+                                                                    egui::RichText::new(text)
+                                                                        .size(10.0)
+                                                                        .color(pal.text_muted),
+                                                                );
+                                                            };
+                                                        let mut pick = |ui: &mut egui::Ui,
+                                                                    k: String,
+                                                                    text: String,
+                                                                    enabled: bool| {
+                                                            let resp = ui.add_enabled(
+                                                                enabled,
+                                                                egui::Button::selectable(
+                                                                    *key == k,
+                                                                    text,
+                                                                ),
+                                                            );
+                                                            if resp.clicked() {
+                                                                *key = k;
+                                                                *changed = true;
+                                                            }
+                                                        };
+                                                        // Default sentinel — always works.
+                                                        pick(
+                                                            ui,
+                                                            String::new(),
+                                                            list[0].label.to_string(),
+                                                            true,
+                                                        );
+                                                        group(ui, "FLUX FONTS");
+                                                        for (c, _) in
+                                                            crate::theme::installed_fonts(list)
+                                                                .iter()
+                                                                .filter(|(c, _)| {
+                                                                    crate::theme::is_bundled(c.key)
+                                                                })
+                                                        {
+                                                            pick(
+                                                                ui,
+                                                                c.key.to_string(),
+                                                                c.label.to_string(),
+                                                                true,
+                                                            );
+                                                        }
+                                                        ui.separator();
+                                                        group(ui, "SYSTEM FONTS");
                                                         for (c, installed) in
                                                             crate::theme::installed_fonts(list)
+                                                                .iter()
+                                                                .filter(|(c, _)| {
+                                                                    !crate::theme::is_bundled(c.key)
+                                                                        && !c.patterns.is_empty()
+                                                                })
                                                         {
-                                                            let text = if installed {
+                                                            let text = if *installed {
                                                                 c.label.to_string()
                                                             } else {
                                                                 format!(
@@ -412,17 +489,35 @@ pub fn show(app: &mut FluxApp, ctx: &egui::Context) {
                                                                     c.label
                                                                 )
                                                             };
-                                                            let resp = ui.add_enabled(
-                                                                installed,
-                                                                egui::Button::selectable(
-                                                                    *key == c.key,
-                                                                    text,
-                                                                ),
+                                                            pick(
+                                                                ui,
+                                                                c.key.to_string(),
+                                                                text,
+                                                                *installed,
                                                             );
-                                                            if resp.clicked() {
-                                                                *key = c.key.to_string();
-                                                                *changed = true;
+                                                        }
+                                                        // Every other family found on the OS —
+                                                        // dedupe against the curated labels above.
+                                                        let curated: Vec<String> = list
+                                                            .iter()
+                                                            .map(|c| {
+                                                                crate::theme::norm_label(c.label)
+                                                            })
+                                                            .collect();
+                                                        for f in crate::theme::system_fonts(
+                                                            mono_list(list),
+                                                        ) {
+                                                            if curated.contains(
+                                                                &crate::theme::norm_label(&f.label),
+                                                            ) {
+                                                                continue;
                                                             }
+                                                            pick(
+                                                                ui,
+                                                                format!("sys:{}", f.path.display()),
+                                                                f.label.clone(),
+                                                                true,
+                                                            );
                                                         }
                                                     });
                                             },
@@ -443,20 +538,6 @@ pub fn show(app: &mut FluxApp, ctx: &egui::Context) {
                                 crate::theme::MONO_FONTS,
                                 &mut fonts_changed,
                             );
-                            if !crate::theme::installed_fonts(crate::theme::MONO_FONTS)
-                                .iter()
-                                .any(|(c, i)| c.nerd && *i)
-                            {
-                                ui.label(
-                                    egui::RichText::new(
-                                        "No Nerd Font detected — JetBrainsMono Nerd Font gives \
-                                 the terminal proper file icons.",
-                                    )
-                                    .color(pal.text_muted)
-                                    .size(11.0)
-                                    .italics(),
-                                );
-                            }
                             ui.horizontal(|ui| {
                                 ui.label(
                                     egui::RichText::new("Terminal size")

@@ -271,6 +271,28 @@ pub fn apply_theme(ctx: &egui::Context, dark: bool) {
 /// to egui's bundled fonts if nothing on the list parses/loads.
 /// Build the font stack from the user's picks: explicit UI/mono choices
 /// go to the front of their families; the OS face remains the fallback.
+/// Fonts compiled into the binary — they always resolve, no download
+/// needed. All are OFL/UFL licensed (see `fonts/FONTS-LICENSES.txt`).
+fn bundled_bytes(key: &str) -> Option<Vec<u8>> {
+    let bytes: &[u8] = match key {
+        "jetbrains-nerd" => include_bytes!("../fonts/JetBrainsMonoNerdFont-Regular.ttf"),
+        "meslo-nerd" => include_bytes!("../fonts/MesloLGSNerdFont-Regular.ttf"),
+        "jetbrains" => include_bytes!("../fonts/JetBrainsMono-Regular.ttf"),
+        "fira-sans" => include_bytes!("../fonts/FiraSans-Regular.ttf"),
+        "ubuntu" => include_bytes!("../fonts/Ubuntu-Regular.ttf"),
+        _ => return None,
+    };
+    Some(bytes.to_vec())
+}
+
+/// True when the choice's bytes ship inside the binary.
+pub fn is_bundled(key: &str) -> bool {
+    matches!(
+        key,
+        "jetbrains-nerd" | "meslo-nerd" | "jetbrains" | "fira-sans" | "ubuntu"
+    )
+}
+
 pub fn load_fonts(ui_key: &str, mono_key: &str) -> egui::FontDefinitions {
     let mut defs = egui::FontDefinitions::default();
     let ui_bytes = font_choice_bytes(ui_key, UI_FONTS).or_else(system_font_bytes);
@@ -331,6 +353,20 @@ pub const UI_FONTS: &[FontChoice] = &[
         nerd: false,
     },
     FontChoice {
+        key: "fira-sans",
+        label: "Fira Sans",
+        patterns: &["firasansregular", "firasans"],
+        exclude: STYLE_WORDS,
+        nerd: false,
+    },
+    FontChoice {
+        key: "ubuntu",
+        label: "Ubuntu",
+        patterns: &["ubuntur", "ubunturegular", "ubuntu"],
+        exclude: STYLE_WORDS,
+        nerd: false,
+    },
+    FontChoice {
         key: "inter",
         label: "Inter",
         patterns: &["inter"],
@@ -355,13 +391,6 @@ pub const UI_FONTS: &[FontChoice] = &[
         key: "segoe",
         label: "Segoe UI",
         patterns: &["segoeui"],
-        exclude: STYLE_WORDS,
-        nerd: false,
-    },
-    FontChoice {
-        key: "ubuntu",
-        label: "Ubuntu",
-        patterns: &["ubuntur", "ubunturegular", "ubuntu"],
         exclude: STYLE_WORDS,
         nerd: false,
     },
@@ -392,7 +421,8 @@ const MONO_STYLE_WORDS: &[&str] = &[
     "retina",
 ];
 
-/// Nerd Fonts first — they carry the glyphs file managers actually use.
+/// Bundled fonts first — they always work out of the box; then system
+/// Nerd Fonts (they carry the glyphs file managers actually use).
 pub const MONO_FONTS: &[FontChoice] = &[
     FontChoice {
         key: "",
@@ -413,6 +443,20 @@ pub const MONO_FONTS: &[FontChoice] = &[
         nerd: true,
     },
     FontChoice {
+        key: "meslo-nerd",
+        label: "MesloLGS Nerd Font",
+        patterns: &["meslolgsnerdfont", "meslolgsnf", "meslolgs"],
+        exclude: MONO_STYLE_WORDS,
+        nerd: true,
+    },
+    FontChoice {
+        key: "jetbrains",
+        label: "JetBrains Mono",
+        patterns: &["jetbrainsmono"],
+        exclude: MONO_STYLE_WORDS,
+        nerd: false,
+    },
+    FontChoice {
         key: "firacode-nerd",
         label: "FiraCode Nerd Font",
         patterns: &["firacodenerdfontmono", "firacodenerdfont"],
@@ -427,25 +471,11 @@ pub const MONO_FONTS: &[FontChoice] = &[
         nerd: true,
     },
     FontChoice {
-        key: "meslo-nerd",
-        label: "MesloLGS Nerd Font",
-        patterns: &["meslolgsnerdfont", "meslolgsnf", "meslolgs"],
-        exclude: MONO_STYLE_WORDS,
-        nerd: true,
-    },
-    FontChoice {
         key: "cascadia-nerd",
         label: "CascadiaCode Nerd Font",
         patterns: &["caskaydiamononerdfont", "caskaydiacodenerdfont"],
         exclude: MONO_STYLE_WORDS,
         nerd: true,
-    },
-    FontChoice {
-        key: "jetbrains",
-        label: "JetBrains Mono",
-        patterns: &["jetbrainsmono"],
-        exclude: MONO_STYLE_WORDS,
-        nerd: false,
     },
     FontChoice {
         key: "firacode",
@@ -505,11 +535,26 @@ pub const MONO_FONTS: &[FontChoice] = &[
     },
 ];
 
-fn norm_stem(s: &str) -> String {
+/// Case-insensitive comparison key for deduping curated labels against
+/// family names parsed out of font files.
+pub fn norm_label(s: &str) -> String {
     s.chars()
         .filter(|c| c.is_alphanumeric())
         .flat_map(|c| c.to_lowercase())
         .collect()
+}
+
+fn norm_stem(s: &str) -> String {
+    norm_label(s)
+}
+
+/// Warm the font-file + system-family caches off the UI thread.
+pub fn prewarm_font_scan() {
+    std::thread::spawn(|| {
+        let _ = font_files();
+        let _ = system_fonts(false);
+        let _ = system_fonts(true);
+    });
 }
 
 static FONT_FILES: std::sync::OnceLock<Vec<std::path::PathBuf>> = std::sync::OnceLock::new();
@@ -612,7 +657,7 @@ fn installed_flags(list: &'static [FontChoice]) -> &'static [bool] {
     };
     slot.get_or_init(|| {
         list.iter()
-            .map(|c| c.patterns.is_empty() || installed_font_file(c).is_some())
+            .map(|c| c.patterns.is_empty() || is_bundled(c.key) || installed_font_file(c).is_some())
             .collect()
     })
 }
@@ -625,9 +670,142 @@ pub fn installed_fonts(list: &'static [FontChoice]) -> Vec<(&'static FontChoice,
 }
 
 fn font_choice_bytes(key: &str, list: &[FontChoice]) -> Option<Vec<u8>> {
+    if let Some(b) = bundled_bytes(key) {
+        return Some(b);
+    }
+    if let Some(path) = key.strip_prefix("sys:") {
+        return std::fs::read(path).ok();
+    }
     let choice = list.iter().find(|c| c.key == key)?;
     let path = installed_font_file(choice)?;
     std::fs::read(path).ok()
+}
+
+/// A font family discovered in the platform font dirs by parsing its
+/// `name` table — beyond the curated pick list.
+pub struct SystemFont {
+    pub label: String,
+    pub path: std::path::PathBuf,
+    pub mono: bool,
+}
+
+/// All font families installed on the system, regular faces only.
+/// Variable fonts, TTC collections, WOFF containers and fonts whose
+/// name table can't be parsed are skipped.
+pub fn system_fonts(mono: bool) -> &'static [SystemFont] {
+    static PROPORTIONAL: std::sync::OnceLock<Vec<SystemFont>> = std::sync::OnceLock::new();
+    static MONO: std::sync::OnceLock<Vec<SystemFont>> = std::sync::OnceLock::new();
+    let slot = if mono { &MONO } else { &PROPORTIONAL };
+    slot.get_or_init(|| {
+        let mut by_family: std::collections::BTreeMap<String, SystemFont> =
+            std::collections::BTreeMap::new();
+        for f in font_files() {
+            let Ok(data) = std::fs::read(f) else {
+                continue;
+            };
+            let Some((family, subfamily, is_mono)) = ttf_meta(&data) else {
+                continue;
+            };
+            if is_mono != mono {
+                continue;
+            }
+            let regular = subfamily.is_empty()
+                || ["regular", "book", "roman", "normal", "plain"]
+                    .iter()
+                    .any(|w| subfamily.contains(w));
+            let entry = SystemFont {
+                label: family.clone(),
+                path: f.clone(),
+                mono,
+            };
+            if regular {
+                // Always (re)insert: replaces a non-regular face or the
+                // previous regular — deterministic given the sorted scan.
+                by_family.insert(family.clone(), entry);
+            } else {
+                by_family.entry(family).or_insert(entry);
+            }
+        }
+        by_family.into_values().collect()
+    })
+    .as_slice()
+}
+
+/// Minimal sfnt reader: family/subfamily from `name`, pitch from `post`.
+/// Returns None for TTC/WOFF/variable fonts — all rasterizer risks.
+fn ttf_meta(data: &[u8]) -> Option<(String, String, bool)> {
+    if data.len() < 12 || &data[..4] != b"\0\x01\0\0" && &data[..4] != b"true" {
+        return None;
+    }
+    let num = u16::from_be_bytes(data[4..6].try_into().ok()?) as usize;
+    let (mut name, mut post) = (None, None);
+    for i in 0..num {
+        let rec = 12 + i * 16;
+        if data.len() < rec + 16 {
+            return None;
+        }
+        let off = u32::from_be_bytes(data[rec + 8..rec + 12].try_into().ok()?) as usize;
+        let len = u32::from_be_bytes(data[rec + 12..rec + 16].try_into().ok()?) as usize;
+        match &data[rec..rec + 4] {
+            b"name" => name = Some((off, len)),
+            b"post" => post = Some((off, len)),
+            b"fvar" => return None,
+            _ => {}
+        }
+    }
+    let (off, len) = name?;
+    let table = data.get(off..off + len)?;
+    if table.len() < 6 {
+        return None;
+    }
+    let count = u16::from_be_bytes(table[2..4].try_into().ok()?) as usize;
+    let storage = u16::from_be_bytes(table[4..6].try_into().ok()?) as usize;
+    // Best record per platform: prefer Windows (3) UTF-16 names.
+    let pick = |want: u16| -> Option<String> {
+        let mut mac_fallback = None;
+        for i in 0..count {
+            let r = 6 + i * 12;
+            let rec = table.get(r..r + 12)?;
+            let platform = u16::from_be_bytes(rec[0..2].try_into().ok()?);
+            let name_id = u16::from_be_bytes(rec[6..8].try_into().ok()?);
+            let slen = u16::from_be_bytes(rec[8..10].try_into().ok()?) as usize;
+            let soff = u16::from_be_bytes(rec[10..12].try_into().ok()?) as usize;
+            if name_id != want {
+                continue;
+            }
+            let raw = table.get(storage + soff..storage + soff + slen)?;
+            if platform == 3 {
+                // UTF-16BE
+                return String::from_utf16(
+                    &raw.as_chunks::<2>()
+                        .0
+                        .iter()
+                        .map(|c| u16::from_be_bytes(*c))
+                        .collect::<Vec<_>>(),
+                )
+                .ok();
+            }
+            mac_fallback.get_or_insert_with(|| raw.iter().map(|&b| b as char).collect::<String>());
+        }
+        mac_fallback
+    };
+    let family = pick(16).or_else(|| pick(1))?.trim().to_string();
+    if family.is_empty() {
+        return None;
+    }
+    let subfamily = pick(17)
+        .or_else(|| pick(2))
+        .unwrap_or_default()
+        .trim()
+        .to_lowercase();
+    // post.isFixedPitch is unreliable alone — Nerd Font patching resets
+    // it on many builds — so the family name is a second signal.
+    let pitched = post
+        .and_then(|(o, l)| data.get(o..o + l))
+        .is_some_and(|t| t.len() >= 16 && u32::from_be_bytes(t[12..16].try_into().unwrap()) != 0);
+    let fname = family.to_lowercase();
+    let mono = pitched || fname.contains("mono") || fname.contains("nerd");
+    Some((family, subfamily, mono))
 }
 
 fn system_font_bytes() -> Option<Vec<u8>> {
@@ -748,6 +926,30 @@ fn collect_font_files(dir: &std::path::Path, depth: u8, out: &mut Vec<std::path:
                 .any(|ext| x.eq_ignore_ascii_case(ext))
         }) {
             out.push(p);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every embedded font must be a static sfnt whose name and pitch
+    /// tables parse — bad bytes would panic epaint at first paint.
+    #[test]
+    fn bundled_fonts_are_valid_static_sfnts() {
+        for (key, mono) in [
+            ("jetbrains-nerd", true),
+            ("meslo-nerd", true),
+            ("jetbrains", true),
+            ("fira-sans", false),
+            ("ubuntu", false),
+        ] {
+            let bytes = bundled_bytes(key).expect("bundled");
+            let (family, _sub, is_mono) =
+                ttf_meta(&bytes).unwrap_or_else(|| panic!("{key} failed name-table parse"));
+            assert!(!family.is_empty(), "{key}: empty family");
+            assert_eq!(is_mono, mono, "{key}: wrong pitch class ({family})");
         }
     }
 }
