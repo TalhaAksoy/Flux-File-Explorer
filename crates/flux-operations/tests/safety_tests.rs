@@ -529,7 +529,10 @@ fn engine_move_overwrite_all_replaces() {
 
 // ---------- non-UTF-8 ----------
 
-#[cfg(unix)]
+// Linux ext-family filesystems allow arbitrary non-NUL bytes in names;
+// APFS rejects invalid UTF-8 at creation time with EILSEQ, so this test
+// can't even build its fixture there. NTFS is UTF-16 — also no-go.
+#[cfg(all(unix, not(target_os = "macos")))]
 #[test]
 fn non_utf8_filename_survives_copy() {
     use std::ffi::OsStr;

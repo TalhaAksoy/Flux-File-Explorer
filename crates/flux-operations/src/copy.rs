@@ -635,9 +635,25 @@ enum MoveStep {
 /// Same-volume moves stay a single atomic rename; anything else falls
 /// back to copy+verified prune. Never silently overwrites.
 fn move_item_inner(src: &Path, dst: &Path, c: &CopyCtx<'_>) -> std::io::Result<MoveStep> {
-    if is_descendant_or_same(src, dst) {
+    // Moving an item onto its own exact path is meaningless — reject.
+    // This is a lexical compare: a different spelling of the same file
+    // (Case.txt → CASE.txt on a case-insensitive fs) is a legitimate
+    // rename handled by the `same_file` branch below, not an error.
+    if src == dst {
         return Err(std::io::Error::other(format!(
-            "cannot move {} — it is the source or inside it",
+            "cannot move {} onto itself",
+            dst.display()
+        )));
+    }
+    // Strict containment — a dir may never move into its own subtree.
+    // Canonical equality alone does NOT reject: on case-insensitive
+    // filesystems Case.txt and CASE.txt canonicalize to one path, yet
+    // the rename between them must proceed (see `same_file` below).
+    let s = normalize(src);
+    let d = normalize(dst);
+    if !paths_equal(&d, &s) && path_starts_with(&d, &s) {
+        return Err(std::io::Error::other(format!(
+            "cannot move {} — it is inside the source",
             dst.display()
         )));
     }
