@@ -344,7 +344,7 @@ pub fn show(app: &mut FluxApp, ctx: &egui::Context) {
                 app.settings = (**orig).clone();
                 app.dark = dark;
                 ctx.set_fonts(crate::theme::load_fonts(&orig.ui_font, &orig.mono_font));
-                ctx.set_zoom_factor(orig.ui_scale);
+                app.apply_ui_scale(ctx);
                 crate::theme::apply_theme(ctx, dark);
             };
             if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
@@ -506,7 +506,7 @@ pub fn show(app: &mut FluxApp, ctx: &egui::Context) {
                                             .show_value(false),
                                         );
                                         if r.drag_stopped() || (r.changed() && !r.dragged()) {
-                                            ctx.set_zoom_factor(app.settings.ui_scale);
+                                            app.apply_ui_scale(ctx);
                                         }
                                     },
                                 );

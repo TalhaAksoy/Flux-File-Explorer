@@ -1003,6 +1003,10 @@ pub fn run(start_dir: Option<PathBuf>) -> eframe::Result<()> {
                 &app.settings.mono_font,
             ));
             cc.egui_ctx.set_zoom_factor(app.settings.ui_scale);
+            // Zoom shrinks the logical space — re-issue the requested
+            // logical size so the physical window grows to match.
+            cc.egui_ctx
+                .send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(1060.0, 680.0)));
             if app.settings.theme == flux_settings::Theme::System {
                 app.dark = matches!(cc.egui_ctx.system_theme(), Some(egui::Theme::Dark));
             }

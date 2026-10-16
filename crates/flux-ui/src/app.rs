@@ -541,6 +541,20 @@ impl FluxApp {
         tab.sel.ids.iter().next().and_then(|&i| s.entry_path(i))
     }
 
+    /// Apply `settings.ui_scale` and resize the OS window by the same
+    /// ratio — egui zoom shrinks the logical space inside the same
+    /// physical window, so the window must grow to keep content roomy.
+    pub fn apply_ui_scale(&mut self, ctx: &egui::Context) {
+        // Points are logical: physical = pts × ppp(zoom). Re-issuing the
+        // current logical size after the zoom change scales the physical
+        // window by exactly new/old.
+        let size_pts = ctx.input(|i| i.viewport().inner_rect.map(|r| r.size()));
+        ctx.set_zoom_factor(self.settings.ui_scale);
+        if let Some(sz) = size_pts {
+            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(sz));
+        }
+    }
+
     pub fn toast(&mut self, msg: impl Into<String>) {
         self.status_msg = Some((msg.into(), Instant::now()));
     }
