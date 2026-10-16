@@ -76,7 +76,9 @@ pub fn show(app: &mut FluxApp, ctx: &egui::Context) {
                 );
             });
     }
-    let cur_dir = app.current_path();
+    // Directory-targeted dialogs keep the last real path — they can only
+    // be raised on a dir tab, so `last_dir_path` is always `Some` here.
+    let cur_dir = app.last_dir_path().unwrap_or_default();
     let mut close = false;
     match &mut dialog {
         Dialog::None => {}
@@ -364,6 +366,34 @@ pub fn show(app: &mut FluxApp, ctx: &egui::Context) {
                     }
                 });
         }
+        Dialog::ConfirmCloseTab { idx } => {
+            let idx = *idx;
+            let mut confirmed = false;
+            card(ctx, "Close Tab")
+                .default_width(400.0)
+                .show(ctx, |ui| {
+                    heading(ui, "Discard pending renames?");
+                    ui.label(
+                        "This Bulk Rename tab has a plan that hasn't been applied. Closing it discards the plan — no files will be changed.",
+                    );
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if crate::widgets::danger_button(ui, "Close Tab").clicked() {
+                                confirmed = true;
+                            }
+                            ui.add_space(4.0);
+                            if crate::widgets::secondary_button(ui, "Keep Open").clicked() {
+                                close = true;
+                            }
+                        });
+                    });
+                });
+            if confirmed {
+                app.force_close_tab(idx);
+                close = true;
+            }
+        }
     }
     // Escape dismisses any open dialog.
     if !close && !matches!(dialog, Dialog::None) && ctx.input(|i| i.key_pressed(egui::Key::Escape))
@@ -527,7 +557,7 @@ pub fn row_context_menu(app: &mut FluxApp, ui: &mut egui::Ui, items: &[PathBuf])
         }
     }
     #[cfg(windows)]
-    if single && flags.single_file && m::item(ui, "Open With…").clicked() {
+    if single && flags.single_file && m::item_icon(ui, Glyph::External, "Open With…").clicked() {
         ui.close();
         if let Some(p) = first.clone()
             && let Err(e) = flux_platform::open_with_dialog(&p)
@@ -539,7 +569,7 @@ pub fn row_context_menu(app: &mut FluxApp, ui: &mut egui::Ui, items: &[PathBuf])
     if single && flags.single_file {
         let target = first.clone().unwrap();
         let apps = app.open_with_apps(&target);
-        m::submenu(ui, "Open With", |ui| {
+        m::submenu_icon(ui, Glyph::External, "Open With", |ui| {
             if apps.is_empty() {
                 ui.weak("No applications found");
             }
@@ -549,7 +579,7 @@ pub fn row_context_menu(app: &mut FluxApp, ui: &mut egui::Ui, items: &[PathBuf])
                 } else {
                     a.name.clone()
                 };
-                if m::item(ui, &label).clicked() {
+                if m::item_icon(ui, Glyph::External, &label).clicked() {
                     ui.close();
                     if let Err(e) = flux_platform::open_with(&target, a) {
                         app.toast(format!("Could not open with {}: {e}", a.name));
@@ -632,7 +662,7 @@ pub fn row_context_menu(app: &mut FluxApp, ui: &mut egui::Ui, items: &[PathBuf])
     // Opt-in recursive folder sizes — Dolphin/Explorer-Properties style.
     // Only real dirs qualify (symlinked dirs show their link, not the
     // target's content).
-    if flags.has_real_dir && m::item(ui, "Calculate Folder Size").clicked() {
+    if flags.has_real_dir && m::item_icon(ui, Glyph::Disk, "Calculate Folder Size").clicked() {
         ui.close();
         app.calculate_dir_sizes(items);
     }
@@ -667,7 +697,7 @@ pub fn row_context_menu(app: &mut FluxApp, ui: &mut egui::Ui, items: &[PathBuf])
     }
     if single_dir
         && !app.settings.bookmarks.contains(first.as_ref().unwrap())
-        && m::item(ui, "Add to Sidebar").clicked()
+        && m::item_icon(ui, Glyph::Plus, "Add to Sidebar").clicked()
     {
         ui.close();
         app.pin_to_sidebar(first.clone().unwrap());
@@ -736,15 +766,19 @@ pub fn bg_context_menu(app: &mut FluxApp, ui: &mut egui::Ui) {
         };
     }
     let has_clip = !app.clipboard.items.is_empty() || app.ext_clipboard.is_some();
-    if m::item_sc_enabled(ui, "Paste", &format!("{CMD}+V"), has_clip).clicked() {
+    if m::item_icon_sc_enabled(ui, Glyph::Paste, "Paste", &format!("{CMD}+V"), has_clip).clicked() {
         ui.close();
-        let dest = app.current_path();
-        app.submit_copy(dest);
+        if let Some(dest) = app.current_path() {
+            app.submit_copy(dest);
+        }
     }
     m::sep(ui);
     // Sort submenu — same affordance as column headers.
-    let cur = app.current_tab().snap.read().unwrap().sort;
-    m::submenu(ui, "Sort By", |ui| {
+    let cur = app
+        .current_dir()
+        .map(|d| d.snap.read().unwrap().sort)
+        .unwrap_or_default();
+    m::submenu_icon(ui, Glyph::Sort, "Sort By", |ui| {
         for (label, key) in [
             ("Name", flux_core::SortKey::Name),
             ("Size", flux_core::SortKey::Size),
@@ -772,7 +806,7 @@ pub fn bg_context_menu(app: &mut FluxApp, ui: &mut egui::Ui) {
         }
     });
     let cur_mode = app.settings.view_mode;
-    m::submenu(ui, "View", |ui| {
+    m::submenu_icon(ui, Glyph::GridView, "View", |ui| {
         for (label, mode) in [
             ("Details", flux_settings::ViewMode::List),
             ("Compact List", flux_settings::ViewMode::Compact),
@@ -786,7 +820,7 @@ pub fn bg_context_menu(app: &mut FluxApp, ui: &mut egui::Ui) {
         }
     });
     let cur_density = app.density;
-    m::submenu(ui, "Row Density", |ui| {
+    m::submenu_icon(ui, Glyph::Density, "Row Density", |ui| {
         for (label, d) in [
             ("Compact", crate::theme::Density::Compact),
             ("Standard", crate::theme::Density::Standard),
@@ -805,16 +839,19 @@ pub fn bg_context_menu(app: &mut FluxApp, ui: &mut egui::Ui) {
     }
     if m::item_icon(ui, Glyph::Terminal, "Open Terminal Here").clicked() {
         ui.close();
-        let p = app.current_path();
-        let _ = flux_platform::open_in_terminal(&p);
+        if let Some(p) = app.current_path() {
+            let _ = flux_platform::open_in_terminal(&p);
+        }
     }
     m::sep(ui);
     if m::item_icon(ui, Glyph::Info, "Properties").clicked() {
         ui.close();
-        app.dialog = Dialog::Properties {
-            path: app.current_path(),
-            meta: None,
-        };
+        if let Some(p) = app.current_path() {
+            app.dialog = Dialog::Properties {
+                path: p,
+                meta: None,
+            };
+        }
     }
 }
 

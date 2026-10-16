@@ -9,7 +9,7 @@ use std::path::Path;
 
 use flux_operations::RenameStatus;
 
-use crate::app::{FluxApp, RenameFilter, Screen};
+use crate::app::{FluxApp, RenameFilter};
 use crate::glyphs::{self, Glyph};
 use crate::theme::Palette;
 use crate::widgets::{self, sp};
@@ -20,8 +20,8 @@ const ROW_H: f32 = 26.0;
 /// split instead of scrolling horizontally.
 const NARROW_W: f32 = 760.0;
 
-/// The workspace — called from the central panel when
-/// `app.screen == Screen::BulkRename`.
+/// The workspace — called from the central panel while the active tab is
+/// `TabContent::BulkRename`.
 pub fn page(app: &mut FluxApp, ui: &mut egui::Ui) {
     let pal = Palette::of(&ui.style().visuals);
 
@@ -131,7 +131,7 @@ fn header(app: &mut FluxApp, ui: &mut egui::Ui, pal: &Palette) {
             pal.text_primary,
         );
         if resp.on_hover_text("Back to files (Esc)").clicked() {
-            app.close_screen();
+            app.leave_workspace();
         }
         ui.add_space(sp::SM);
         ui.label(
@@ -140,12 +140,12 @@ fn header(app: &mut FluxApp, ui: &mut egui::Ui, pal: &Palette) {
                 .size(22.0)
                 .strong(),
         );
-        if let Screen::BulkRename(br) = &app.screen {
+        if let Some(br) = app.current_tab().bulk_rename() {
             ui.add_space(sp::XS);
             widgets::status_chip(ui, pal, "info", &format!("{} items", br.sources.len()));
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if let Screen::BulkRename(br) = &mut app.screen {
+            if let Some(br) = app.current_tab_mut().bulk_rename_mut() {
                 let w = ui.available_width().clamp(110.0, 200.0);
                 let r = widgets::text_field(ui, &mut br.query, "Filter preview…", w);
                 let _ = r;
@@ -158,7 +158,7 @@ fn header(app: &mut FluxApp, ui: &mut egui::Ui, pal: &Palette) {
 // ── Rules column ──
 
 fn rules(app: &mut FluxApp, ui: &mut egui::Ui, pal: &Palette) {
-    let Screen::BulkRename(br) = &mut app.screen else {
+    let Some(br) = app.current_tab_mut().bulk_rename_mut() else {
         return;
     };
     let field_w = ui.available_width();
@@ -340,7 +340,7 @@ fn rules(app: &mut FluxApp, ui: &mut egui::Ui, pal: &Palette) {
 // ── Preview + footer ──
 
 fn preview_and_footer(app: &mut FluxApp, ui: &mut egui::Ui, pal: &Palette) {
-    let Screen::BulkRename(br) = &mut app.screen else {
+    let Some(br) = app.current_tab_mut().bulk_rename_mut() else {
         return;
     };
 
@@ -529,18 +529,24 @@ fn preview_and_footer(app: &mut FluxApp, ui: &mut egui::Ui, pal: &Palette) {
                 .min_size(egui::vec2(0.0, 30.0)),
             );
             if btn.clicked() {
-                if let Screen::BulkRename(br) = &mut app.screen {
+                if let Some(br) = app.current_tab_mut().bulk_rename_mut() {
                     let actions = std::mem::take(&mut br.plan);
                     app.ops.submit(
                         flux_operations::OpKind::BatchRename { actions },
                         flux_operations::ConflictPolicy::Ask,
                     );
                 }
-                app.close_screen();
+                // Executed — the workspace has served its purpose; the
+                // plan is gone so this closes without a discard prompt.
+                let a = app.active;
+                app.close_tab(a);
             }
             ui.add_space(sp::SM);
             if widgets::ghost_button(ui, "Cancel").clicked() {
-                app.close_screen();
+                // Abandon the workspace. A live plan still asks for
+                // confirmation — never discard it silently.
+                let a = app.active;
+                app.close_tab(a);
             }
         });
     });

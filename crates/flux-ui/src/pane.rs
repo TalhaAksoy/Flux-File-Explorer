@@ -1,4 +1,6 @@
-//! Per-tab navigation state: snapshot handle, history, selection, filter.
+//! Per-tab workspace state: snapshot handle, history, selection, filter —
+//! plus the unified tab container mixing directory and application
+//! workspaces in one strip.
 
 use std::collections::HashSet;
 use std::ffi::OsString;
@@ -7,6 +9,9 @@ use std::path::PathBuf;
 use flux_core::snapshot::{DirSnapshot, SnapshotHandle};
 use flux_core::{EntryIdx, SortSpec};
 use rustc_hash::FxHashSet;
+
+use crate::app::{BulkRenameState, SettingsUi};
+use crate::glyphs::Glyph;
 
 /// Selection is by entry index (stable within a snapshot's append-only
 /// arena). `anchor`/`focus` are VIEW rows for range selection.
@@ -170,9 +175,9 @@ impl NavHistory {
     }
 }
 
-/// Everything a tab needs. The expensive part (entries) lives in the shared
-/// snapshot; this struct is small.
-pub struct Tab {
+/// Everything a *directory* tab needs. The expensive part (entries) lives
+/// in the shared snapshot; this struct is small.
+pub struct DirectoryTab {
     pub snap: SnapshotHandle,
     pub sel: Selection,
     pub history: NavHistory,
@@ -193,7 +198,7 @@ pub struct Tab {
     pub watcher_refresh_pending: bool,
 }
 
-impl Tab {
+impl DirectoryTab {
     pub fn new(path: PathBuf) -> Self {
         let mut history = NavHistory::default();
         history.push(path.clone());
@@ -241,5 +246,108 @@ impl Tab {
                     .or_else(|| Some(s.path.display().to_string()))
             })
             .unwrap_or_else(|| "…".into())
+    }
+}
+
+/// What occupies a top-level tab slot — a filesystem directory or a
+/// first-class application workspace. All variants are real state owned
+/// by the tab; there is no hidden global page.
+pub enum TabContent {
+    Directory(Box<DirectoryTab>),
+    Settings(SettingsUi),
+    BulkRename(Box<BulkRenameState>),
+}
+
+/// A tab in the unified strip: stable identity + typed workspace state.
+pub struct Tab {
+    /// Stable identity for the session (position shifts on close).
+    pub id: u64,
+    pub content: TabContent,
+}
+
+impl Tab {
+    pub fn directory(id: u64, path: PathBuf) -> Self {
+        Self {
+            id,
+            content: TabContent::Directory(Box::new(DirectoryTab::new(path))),
+        }
+    }
+
+    /// Directory workspace access — `None` for application tabs.
+    pub fn dir(&self) -> Option<&DirectoryTab> {
+        match &self.content {
+            TabContent::Directory(d) => Some(d),
+            _ => None,
+        }
+    }
+
+    pub fn dir_mut(&mut self) -> Option<&mut DirectoryTab> {
+        match &mut self.content {
+            TabContent::Directory(d) => Some(d),
+            _ => None,
+        }
+    }
+
+    pub fn settings(&self) -> Option<&SettingsUi> {
+        match &self.content {
+            TabContent::Settings(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    pub fn settings_mut(&mut self) -> Option<&mut SettingsUi> {
+        match &mut self.content {
+            TabContent::Settings(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    pub fn bulk_rename(&self) -> Option<&BulkRenameState> {
+        match &self.content {
+            TabContent::BulkRename(b) => Some(b),
+            _ => None,
+        }
+    }
+
+    pub fn bulk_rename_mut(&mut self) -> Option<&mut BulkRenameState> {
+        match &mut self.content {
+            TabContent::BulkRename(b) => Some(b),
+            _ => None,
+        }
+    }
+
+    /// Whether this workspace holds a live, unexecuted rename plan —
+    /// used to confirm before the tab is closed and the plan dropped.
+    pub fn has_pending_rename_plan(&self) -> bool {
+        self.bulk_rename().is_some_and(|br| {
+            br.plan
+                .iter()
+                .any(|a| a.status == flux_operations::RenameStatus::Ready)
+        })
+    }
+
+    /// Title shown in the tab strip.
+    pub fn title(&self) -> String {
+        match &self.content {
+            TabContent::Directory(d) => d.title(),
+            TabContent::Settings(_) => "Settings".into(),
+            TabContent::BulkRename(_) => "Bulk Rename".into(),
+        }
+    }
+
+    /// Leading icon shown in the tab strip.
+    pub fn glyph(&self) -> Glyph {
+        match &self.content {
+            TabContent::Directory(_) => Glyph::Folder,
+            TabContent::Settings(_) => Glyph::Gear,
+            TabContent::BulkRename(_) => Glyph::Pencil,
+        }
+    }
+
+    /// True while a directory tab's enumeration is in flight.
+    pub fn loading(&self) -> bool {
+        self.dir()
+            .and_then(|d| d.snap.read().ok().map(|s| s.state.is_loading()))
+            .unwrap_or(false)
     }
 }

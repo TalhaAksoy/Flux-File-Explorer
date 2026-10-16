@@ -4,7 +4,7 @@
 
 use egui::{Color32, CornerRadius, Pos2, Rect, Stroke, StrokeKind, Vec2};
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Glyph {
     Back,
     Forward,
@@ -37,6 +37,10 @@ pub enum Glyph {
     Keyboard,
     /// Three fader lines — advanced settings.
     Sliders,
+    /// Three horizontal bars of decreasing length — sort order.
+    Sort,
+    /// Three evenly spaced rules — list/row density.
+    Density,
     /// Circled i — about/properties.
     Info,
     /// Scissors — cut.
@@ -272,6 +276,23 @@ pub fn paint_glyph(p: &egui::Painter, rect: Rect, g: Glyph, color: Color32) {
                     st,
                 );
                 p.circle_filled(Pos2::new(c.x + knob * r * 1.4, y), w * 1.1, color);
+            }
+        }
+        Glyph::Sort => {
+            // Bars shrinking top→bottom, like a funnel.
+            for i in 0..3 {
+                let y = c.y + (i as f32 - 1.0) * r * 0.52;
+                let half = r * (0.72 - i as f32 * 0.22);
+                p.line_segment([Pos2::new(c.x - half, y), Pos2::new(c.x + half, y)], st);
+            }
+        }
+        Glyph::Density => {
+            for i in 0..3 {
+                let y = c.y + (i as f32 - 1.0) * r * 0.52;
+                p.line_segment(
+                    [Pos2::new(c.x - r * 0.72, y), Pos2::new(c.x + r * 0.72, y)],
+                    st,
+                );
             }
         }
         Glyph::Info => {
@@ -543,6 +564,30 @@ pub fn icon_toggle(ui: &mut egui::Ui, g: Glyph, tip: &str, on: bool) -> egui::Re
     }
     let col = if on { accent } else { vis.fg_stroke.color };
     paint_glyph(ui.painter(), rect.shrink(size * 0.22), g, col);
+    resp
+}
+
+/// Toggle-style icon button that can be disabled — same visuals as
+/// `icon_toggle` but greyed out and unclickable when `enabled` is false.
+pub fn icon_toggle_enabled(
+    ui: &mut egui::Ui,
+    g: Glyph,
+    tip: &str,
+    on: bool,
+    enabled: bool,
+) -> egui::Response {
+    if enabled {
+        return icon_toggle(ui, g, tip, on);
+    }
+    let size = ui.spacing().interact_size.y;
+    let (rect, resp) = ui.allocate_exact_size(Vec2::splat(size), egui::Sense::hover());
+    let resp = resp.on_disabled_hover_text(tip);
+    paint_glyph(
+        ui.painter(),
+        rect.shrink(size * 0.22),
+        g,
+        ui.visuals().weak_text_color(),
+    );
     resp
 }
 

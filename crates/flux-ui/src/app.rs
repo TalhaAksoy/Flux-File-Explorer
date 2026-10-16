@@ -16,7 +16,7 @@ use flux_platform::{FsWatcher, Volume, mounted_volumes};
 use flux_search::{SearchEngine, SearchEvent, SearchHit};
 use flux_settings::Settings;
 
-use crate::pane::Tab;
+use crate::pane::{DirectoryTab, Tab, TabContent};
 use crate::theme::Density;
 
 /// Internal file clipboard. Writes are also mirrored to the OS clipboard
@@ -56,24 +56,14 @@ pub enum Dialog {
         /// thread on slow/network filesystems.
         meta: Option<crate::dialogs::PropsMeta>,
     },
+    /// A Bulk Rename workspace tab holds a live, unexecuted plan —
+    /// confirm before discarding it.
+    ConfirmCloseTab {
+        idx: usize,
+    },
 }
 
-/// Top-level workspace shown in the main content region. `Explorer` is the
-/// file browser; `Settings`/`BulkRename` are full pages that replace the
-/// browser panes while open (tab bar + status bar stay — they're global).
-/// Explorer state (tabs, selections, scroll) is untouched while a page is
-/// up; closing a page restores it exactly.
-#[derive(Default)]
-pub enum Screen {
-    #[default]
-    Explorer,
-    Settings(SettingsUi),
-    // Boxed: the planner state is ~250 bytes; keeping it off the enum
-    // keeps `Screen` (and `FluxApp`) small in the common Explorer case.
-    BulkRename(Box<BulkRenameState>),
-}
-
-/// Settings-page state: which category is focused and the search query
+/// Settings-tab state: which category is focused and the search query
 /// that filters the registry (empty query = normal category view).
 #[derive(Default)]
 pub struct SettingsUi {
@@ -359,12 +349,11 @@ pub struct FluxApp {
 
     pub tabs: Vec<Tab>,
     pub active: usize,
+    /// Monotonic id source for new tabs.
+    pub next_tab_id: u64,
 
     pub clipboard: Clipboard,
     pub dialog: Dialog,
-    /// What fills the main content region — the file explorer, the
-    /// Settings page, or the Bulk Rename workspace.
-    pub screen: Screen,
     pub address_edit: Option<String>,
     pub focus_address: bool,
     pub focus_filter: bool,
@@ -458,7 +447,8 @@ pub struct FluxApp {
 /// Env-driven screenshot capture for visual QA. `FLUX_SHOT_OUT` enables
 /// it; `FLUX_SHOT_SCREEN` = explorer|settings|rename, `FLUX_SHOT_DIR`
 /// opens that folder, `FLUX_SHOT_THEME` = dark|light, `FLUX_SHOT_SIZE` =
-/// WxH (parsed in `run`), `FLUX_SHOT_WAIT` = settle frames (default 45).
+/// WxH (parsed in `run`), `FLUX_SHOT_WAIT` = settle frames (default 45),
+/// `FLUX_SHOT_MENU` = row|bg opens that context menu before capturing.
 pub struct ShotCfg {
     pub out: PathBuf,
     pub screen: String,
@@ -469,6 +459,9 @@ pub struct ShotCfg {
     /// Re-requested at runtime — some Wayland compositors ignore the
     /// initial `with_inner_size` but honor post-map resizes.
     pub size: Option<[f32; 2]>,
+    /// `row` opens the file context menu on the first row; `bg` the
+    /// empty-space menu.
+    pub menu: Option<String>,
 }
 
 impl ShotCfg {
@@ -485,6 +478,7 @@ impl ShotCfg {
             requested: false,
             screen_done: false,
             size: shot_size_env(),
+            menu: std::env::var("FLUX_SHOT_MENU").ok(),
         })
     }
 }
@@ -564,22 +558,55 @@ fn undo_entry(kind: &OpKind, label: &str) -> Option<UndoEntry> {
 }
 
 impl FluxApp {
-    /// Open the Settings page over the current explorer state.
+    /// Settings is a singleton workspace tab: focus it if it exists,
+    /// otherwise open it alongside the directory tabs.
     pub fn open_settings(&mut self) {
-        self.screen = Screen::Settings(SettingsUi::default());
+        if let Some(i) = self
+            .tabs
+            .iter()
+            .position(|t| matches!(t.content, TabContent::Settings(_)))
+        {
+            self.activate_tab(i);
+            return;
+        }
+        let id = self.alloc_tab_id();
+        self.push_tab(Tab {
+            id,
+            content: TabContent::Settings(SettingsUi::default()),
+        });
     }
 
-    /// Open the Bulk Rename workspace for the given sources.
+    /// Open the Bulk Rename workspace for the given sources as a new tab.
     pub fn open_bulk_rename(&mut self, sources: Vec<PathBuf>) {
         let mut st = BulkRenameState::new(sources);
         st.recompute_async();
-        self.screen = Screen::BulkRename(Box::new(st));
+        let id = self.alloc_tab_id();
+        self.push_tab(Tab {
+            id,
+            content: TabContent::BulkRename(Box::new(st)),
+        });
     }
 
-    /// Leave a page back to the explorer. Explorer state was never
-    /// touched, so this is instant — no rescan.
-    pub fn close_screen(&mut self) {
-        self.screen = Screen::Explorer;
+    /// Leave the active workspace tab for the nearest directory tab —
+    /// the workspace stays open (its tab keeps all state).
+    pub fn leave_workspace(&mut self) {
+        if self.current_tab().dir().is_some() {
+            return;
+        }
+        if let Some(i) = self.tabs.iter().rposition(|t| t.dir().is_some()) {
+            self.activate_tab(i);
+        }
+    }
+
+    fn alloc_tab_id(&mut self) -> u64 {
+        self.next_tab_id += 1;
+        self.next_tab_id
+    }
+
+    /// Append a tab and activate it.
+    fn push_tab(&mut self, tab: Tab) {
+        self.tabs.push(tab);
+        self.active = self.tabs.len() - 1;
     }
 
     /// Cached `open_with_apps` for `path` (see field docs).
@@ -624,26 +651,39 @@ impl Default for FluxApp {
 
 impl FluxApp {
     pub fn new() -> Self {
-        let settings = flux_settings::load();
+        Self::from_settings(flux_settings::load())
+    }
+
+    /// Build the app around an explicit settings value — tests use this
+    /// to avoid touching the real user config.
+    pub fn from_settings(settings: Settings) -> Self {
+        let mut next_id = 0u64;
+        let mut alloc = || {
+            next_id += 1;
+            next_id
+        };
         let mut tabs: Vec<Tab> = if settings.tabs.is_empty() {
-            vec![Tab::new(flux_platform::home_dir())]
+            vec![Tab::directory(alloc(), flux_platform::home_dir())]
         } else {
             settings
                 .tabs
                 .iter()
                 .enumerate()
                 .map(|(i, p)| {
-                    let mut t = Tab::new(p.clone());
-                    t.deferred_load = i != 0; // only tab 0 scans at startup
-                    t
+                    let mut d = DirectoryTab::new(p.clone());
+                    d.deferred_load = i != 0; // only tab 0 scans at startup
+                    Tab {
+                        id: alloc(),
+                        content: TabContent::Directory(Box::new(d)),
+                    }
                 })
                 .collect()
         };
         if tabs.is_empty() {
-            tabs.push(Tab::new(flux_platform::home_dir()));
+            tabs.push(Tab::directory(alloc(), flux_platform::home_dir()));
         }
-        {
-            let mut s = tabs[0].snap.write().unwrap();
+        if let Some(d0) = tabs[0].dir_mut() {
+            let mut s = d0.snap.write().unwrap();
             s.show_hidden = settings.show_hidden;
             s.show_system = settings.show_system_files;
             s.sort = sort_from_settings(&settings);
@@ -669,9 +709,9 @@ impl FluxApp {
             settings,
             tabs,
             active: 0,
+            next_tab_id: next_id,
             clipboard: Clipboard::default(),
             dialog: Dialog::None,
-            screen: Screen::Explorer,
             address_edit: None,
             focus_address: false,
             focus_filter: false,
@@ -753,20 +793,45 @@ impl FluxApp {
         &mut self.tabs[self.active]
     }
 
-    pub fn current_snap(&self) -> SnapshotHandle {
-        self.current_tab().snap.clone()
+    /// Directory workspace of the active tab — `None` for application
+    /// tabs (Settings, Bulk Rename, …). Directory-only operations must
+    /// go through this so a workspace tab can never fake a path.
+    pub fn current_dir(&self) -> Option<&DirectoryTab> {
+        self.current_tab().dir()
     }
 
-    pub fn current_path(&self) -> PathBuf {
-        self.current_tab().snap.read().unwrap().path.clone()
+    pub fn current_dir_mut(&mut self) -> Option<&mut DirectoryTab> {
+        self.current_tab_mut().dir_mut()
     }
 
-    /// Navigate a tab to `path`, pushing history. Cancels the in-flight scan
-    /// implicitly via generation bump.
+    pub fn current_snap(&self) -> Option<SnapshotHandle> {
+        self.current_dir().map(|d| d.snap.clone())
+    }
+
+    pub fn current_path(&self) -> Option<PathBuf> {
+        self.current_dir()
+            .map(|d| d.snap.read().unwrap().path.clone())
+    }
+
+    /// Navigate a directory tab to `path`, pushing history. Cancels the
+    /// in-flight scan implicitly via generation bump. When the active
+    /// tab is an application workspace, navigation lands on the most
+    /// recently used directory tab (creating one if none exists) —
+    /// sidebar/drop actions stay usable from any workspace.
     pub fn navigate(&mut self, path: PathBuf) {
+        if self.current_dir().is_none() {
+            if let Some(i) = self.tabs.iter().rposition(|t| t.dir().is_some()) {
+                self.active = i;
+            } else {
+                self.new_tab_at(path);
+                return;
+            }
+        }
         let filter_text = self.filter_text.clone();
         let snap = {
-            let tab = self.current_tab_mut();
+            let Some(tab) = self.current_dir_mut() else {
+                return;
+            };
             tab.history.push(path.clone());
             tab.sel.clear();
             let mut s = tab.snap.write().unwrap();
@@ -779,7 +844,9 @@ impl FluxApp {
             tab.snap.clone()
         };
         let g = self.enum_engine.navigate(&snap, path.clone());
-        self.current_tab_mut().gen_id = g;
+        if let Some(t) = self.current_dir_mut() {
+            t.gen_id = g;
+        }
         self.size_engine.cancel_current();
         self.watcher.watch(&path);
         self.free_space = flux_platform::free_space(&path);
@@ -788,47 +855,57 @@ impl FluxApp {
     }
 
     /// Re-enumerate the current directory, preserving selection by name.
+    /// No-op on application tabs.
     pub fn refresh(&mut self) {
-        let (snap, path) = {
-            let tab = self.current_tab_mut();
+        let Some((snap, path)) = self.current_dir_mut().map(|tab| {
             let s = tab.snap.read().unwrap();
             let names = tab.sel.selected_names(&s);
             let path = s.path.clone();
             drop(s);
             tab.reselect_after_load = Some(names);
             (tab.snap.clone(), path)
+        }) else {
+            return;
         };
         let g = self.enum_engine.navigate(&snap, path.clone());
-        self.current_tab_mut().gen_id = g;
+        if let Some(t) = self.current_dir_mut() {
+            t.gen_id = g;
+        }
         self.watcher.watch(&path);
     }
 
     pub fn go_up(&mut self) {
-        if let Some(parent) = self.current_path().parent().map(|p| p.to_path_buf()) {
+        let parent = self
+            .current_path()
+            .and_then(|p| p.parent().map(|p| p.to_path_buf()));
+        if let Some(parent) = parent {
             self.navigate(parent);
         }
     }
 
     pub fn go_back(&mut self) {
-        if let Some(p) = self.current_tab_mut().history.back() {
+        if let Some(p) = self.current_dir_mut().and_then(|t| t.history.back()) {
             self.navigate_no_history(p);
         }
     }
 
     pub fn go_forward(&mut self) {
-        if let Some(p) = self.current_tab_mut().history.forward() {
+        if let Some(p) = self.current_dir_mut().and_then(|t| t.history.forward()) {
             self.navigate_no_history(p);
         }
     }
 
     fn navigate_no_history(&mut self, path: PathBuf) {
-        let snap = {
-            let tab = self.current_tab_mut();
+        let Some(snap) = self.current_dir_mut().map(|tab| {
             tab.sel.clear();
             tab.snap.clone()
+        }) else {
+            return;
         };
         let g = self.enum_engine.navigate(&snap, path.clone());
-        self.current_tab_mut().gen_id = g;
+        if let Some(t) = self.current_dir_mut() {
+            t.gen_id = g;
+        }
         self.watcher.watch(&path);
         self.free_space = flux_platform::free_space(&path);
         self.address_edit = None;
@@ -836,7 +913,10 @@ impl FluxApp {
 
     pub fn open_entry(&mut self, idx: flux_core::EntryIdx) {
         let (path, is_dir) = {
-            let s = self.current_tab().snap.read().unwrap();
+            let Some(d) = self.current_dir() else {
+                return;
+            };
+            let s = d.snap.read().unwrap();
             match s.entry(idx) {
                 Some(e) => (s.path.join(&e.name), e.is_dir()),
                 None => return,
@@ -849,9 +929,11 @@ impl FluxApp {
         }
     }
 
-    /// Selected entries as absolute paths.
+    /// Selected entries as absolute paths — empty on workspace tabs.
     pub fn selected_paths(&self) -> Vec<PathBuf> {
-        let tab = self.current_tab();
+        let Some(tab) = self.current_dir() else {
+            return Vec::new();
+        };
         let s = tab.snap.read().unwrap();
         tab.sel
             .ids
@@ -862,7 +944,7 @@ impl FluxApp {
 
     /// Path of the focused row, or the sole selection, else None.
     pub fn focused_path(&self) -> Option<PathBuf> {
-        let tab = self.current_tab();
+        let tab = self.current_dir()?;
         let s = tab.snap.read().unwrap();
         if let Some(row) = tab.sel.focus
             && let Some(idx) = s.row_index(row)
@@ -891,54 +973,86 @@ impl FluxApp {
     }
 
     pub fn new_tab(&mut self) {
-        let path = self.current_path();
-        let t = Tab::new(path.clone());
-        {
-            let mut s = t.snap.write().unwrap();
-            s.show_hidden = self.settings.show_hidden;
-            s.show_system = self.settings.show_system_files;
-        }
-        self.tabs.push(t);
-        self.active = self.tabs.len() - 1;
-        self.navigate(path);
+        // From a workspace tab, clone the most recent directory instead.
+        let path = self.current_path().unwrap_or_else(|| {
+            self.tabs
+                .iter()
+                .rev()
+                .find_map(|t| t.dir().map(|d| d.snap.read().unwrap().path.clone()))
+                .unwrap_or_else(flux_platform::home_dir)
+        });
+        self.new_tab_at(path);
     }
 
     pub fn new_tab_at(&mut self, path: PathBuf) {
-        let t = Tab::new(path.clone());
-        {
-            let mut s = t.snap.write().unwrap();
+        let mut t = Tab::directory(self.alloc_tab_id(), path.clone());
+        if let Some(d) = t.dir_mut() {
+            let mut s = d.snap.write().unwrap();
             s.show_hidden = self.settings.show_hidden;
             s.show_system = self.settings.show_system_files;
         }
-        self.tabs.push(t);
-        self.active = self.tabs.len() - 1;
+        self.push_tab(t);
         self.navigate(path);
     }
 
+    /// Close tab `idx`. A Bulk Rename workspace holding an unexecuted
+    /// plan asks for confirmation first — closing must never silently
+    /// discard a rename the user was mid-way through.
     pub fn close_tab(&mut self, idx: usize) {
-        if self.tabs.len() <= 1 {
+        if idx >= self.tabs.len() {
+            return;
+        }
+        if self.tabs[idx].has_pending_rename_plan() {
+            self.dialog = Dialog::ConfirmCloseTab { idx };
+            return;
+        }
+        self.force_close_tab(idx);
+    }
+
+    /// Close a tab unconditionally (post-confirmation / non-dirty).
+    pub fn force_close_tab(&mut self, idx: usize) {
+        if idx >= self.tabs.len() {
             return;
         }
         self.enum_engine.cancel_current();
         self.meta_engine.cancel_current();
         self.tabs.remove(idx);
-        if self.active >= self.tabs.len() {
+        if self.tabs.is_empty() {
+            // Never leave the window without a workspace — reopen Home.
+            self.new_tab_at(flux_platform::home_dir());
+            return;
+        }
+        if self.active > idx {
+            self.active -= 1;
+        } else if self.active >= self.tabs.len() {
             self.active = self.tabs.len() - 1;
         }
-        let (snap, path, deferred) = {
-            let t = self.current_tab();
+        self.arm_current_dir_tab();
+    }
+
+    /// After the active tab becomes a directory tab (activation or a
+    /// neighboring close): kick deferred loads and re-arm the watcher.
+    fn arm_current_dir_tab(&mut self) {
+        let Some((snap, path, deferred)) = self.current_dir().map(|t| {
             (
                 t.snap.clone(),
                 t.snap.read().unwrap().path.clone(),
                 t.deferred_load,
             )
+        }) else {
+            return;
         };
         if deferred {
-            self.current_tab_mut().deferred_load = false;
+            if let Some(t) = self.current_dir_mut() {
+                t.deferred_load = false;
+            }
             let g = self.enum_engine.navigate(&snap, path.clone());
-            self.current_tab_mut().gen_id = g;
+            if let Some(t) = self.current_dir_mut() {
+                t.gen_id = g;
+            }
         }
         self.watcher.watch(&path);
+        self.free_space = flux_platform::free_space(&path);
     }
 
     pub fn activate_tab(&mut self, idx: usize) {
@@ -946,25 +1060,13 @@ impl FluxApp {
             return;
         }
         self.active = idx;
-        let (snap, path, deferred) = {
-            let t = self.current_tab();
-            (
-                t.snap.clone(),
-                t.snap.read().unwrap().path.clone(),
-                t.deferred_load,
-            )
-        };
-        if deferred {
-            self.current_tab_mut().deferred_load = false;
-            let g = self.enum_engine.navigate(&snap, path.clone());
-            self.current_tab_mut().gen_id = g;
-        }
-        self.watcher.watch(&path);
-        self.free_space = flux_platform::free_space(&path);
+        self.arm_current_dir_tab();
     }
 
     pub fn set_filter(&mut self, text: String) {
-        let tab = self.current_tab_mut();
+        let Some(tab) = self.current_dir_mut() else {
+            return;
+        };
         tab.filter = text;
         {
             let mut s = tab.snap.write().unwrap();
@@ -980,27 +1082,64 @@ impl FluxApp {
     }
 
     pub fn set_sort(&mut self, spec: SortSpec) {
-        let tab = self.current_tab_mut();
-        {
-            let mut s = tab.snap.write().unwrap();
-            s.sort = spec;
-        }
-        let g = tab.gen_id;
-        let snap = tab.snap.clone();
+        let Some((snap, g)) = self.current_dir_mut().map(|tab| {
+            tab.snap.write().unwrap().sort = spec;
+            (tab.snap.clone(), tab.gen_id)
+        }) else {
+            return;
+        };
         self.compute.rebuild(&snap, g);
+    }
+
+    /// Apply a sort spec to the most recently used directory tab —
+    /// used by Settings, which has no snapshot of its own but should
+    /// live-preview on the directory the user came from.
+    pub fn set_sort_last_dir(&mut self, spec: SortSpec) {
+        let Some((snap, g)) = self
+            .tabs
+            .iter_mut()
+            .rev()
+            .find_map(|t| t.dir_mut())
+            .map(|d| {
+                d.snap.write().unwrap().sort = spec;
+                (d.snap.clone(), d.gen_id)
+            })
+        else {
+            return;
+        };
+        self.compute.rebuild(&snap, g);
+    }
+
+    /// Path of the directory a workspace-agnostic action lands on — the
+    /// active tab's dir, else the most recent directory tab's path.
+    pub fn last_dir_path(&self) -> Option<PathBuf> {
+        self.current_path().or_else(|| {
+            self.tabs
+                .iter()
+                .rev()
+                .find_map(|t| t.dir().map(|d| d.snap.read().unwrap().path.clone()))
+        })
+    }
+
+    /// The directory a workspace-agnostic toggle should land on: the
+    /// active tab if it's a directory, else the most recent dir tab
+    /// (Settings changes should live-preview where the user will land).
+    fn target_dir_mut(&mut self) -> Option<&mut DirectoryTab> {
+        if self.current_dir().is_some() {
+            return self.current_dir_mut();
+        }
+        self.tabs.iter_mut().rev().find_map(|t| t.dir_mut())
     }
 
     pub fn toggle_hidden(&mut self) {
         self.settings.show_hidden = !self.settings.show_hidden;
         let show_hidden = self.settings.show_hidden;
-        let tab = self.current_tab_mut();
-        {
-            let mut s = tab.snap.write().unwrap();
-            s.show_hidden = show_hidden;
+        if let Some((snap, g)) = self.target_dir_mut().map(|tab| {
+            tab.snap.write().unwrap().show_hidden = show_hidden;
+            (tab.snap.clone(), tab.gen_id)
+        }) {
+            self.compute.rebuild(&snap, g);
         }
-        let g = tab.gen_id;
-        let snap = tab.snap.clone();
-        self.compute.rebuild(&snap, g);
         self.save_settings();
     }
 
@@ -1023,14 +1162,12 @@ impl FluxApp {
     /// harmless no-op elsewhere). Used by the Settings dialog live preview.
     pub fn set_show_system_files(&mut self, show: bool) {
         self.settings.show_system_files = show;
-        let tab = self.current_tab_mut();
-        {
-            let mut s = tab.snap.write().unwrap();
-            s.show_system = show;
+        if let Some((snap, g)) = self.target_dir_mut().map(|tab| {
+            tab.snap.write().unwrap().show_system = show;
+            (tab.snap.clone(), tab.gen_id)
+        }) {
+            self.compute.rebuild(&snap, g);
         }
-        let g = tab.gen_id;
-        let snap = tab.snap.clone();
-        self.compute.rebuild(&snap, g);
     }
 
     /// Flush debounced settings writes once they've been quiet long
@@ -1044,10 +1181,13 @@ impl FluxApp {
     }
 
     pub fn save_settings(&mut self) {
+        // Only directory tabs persist — workspace tabs (Settings, Bulk
+        // Rename) are per-session state that must not resurrect stale.
         self.settings.tabs = self
             .tabs
             .iter()
-            .map(|t| t.snap.read().unwrap().path.clone())
+            .filter_map(|t| t.dir())
+            .map(|d| d.snap.read().unwrap().path.clone())
             .collect();
         self.settings.density = match self.density {
             Density::Compact => flux_settings::Density::Compact,
@@ -1061,8 +1201,9 @@ impl FluxApp {
     /// `items` (entries of the current snapshot only — the result lands
     /// in their size cell like deferred metadata).
     pub fn calculate_dir_sizes(&mut self, items: &[PathBuf]) {
-        let gen_id = self.current_tab().gen_id;
-        let snap = self.current_snap();
+        let Some((snap, gen_id)) = self.current_dir().map(|d| (d.snap.clone(), d.gen_id)) else {
+            return;
+        };
         let mut asked = 0u32;
         {
             let s = snap.read().unwrap();
@@ -1143,7 +1284,9 @@ impl FluxApp {
     /// Finder behavior.
     pub fn start_drag_row(&mut self, row: usize) {
         let (items, key, kind) = {
-            let tab = self.current_tab_mut();
+            let Some(tab) = self.current_dir_mut() else {
+                return;
+            };
             let s = tab.snap.read().unwrap();
             let Some(idx) = s.row_index(row) else {
                 return;
@@ -1356,42 +1499,48 @@ impl FluxApp {
                 EnumEvent::Finished { gen_id, .. } => {
                     let mut rescan_idx: Option<usize> = None;
                     for (i, tab) in self.tabs.iter_mut().enumerate() {
-                        if tab.gen_id == gen_id {
+                        let Some(d) = tab.dir_mut() else {
+                            continue;
+                        };
+                        if d.gen_id == gen_id {
                             // Final global sort on the compute thread.
-                            self.compute.rebuild(&tab.snap, gen_id);
+                            self.compute.rebuild(&d.snap, gen_id);
                             // Deferred metadata: stat entries in background.
-                            self.meta_engine.fill(&tab.snap, gen_id);
-                            if let Some(names) = tab.reselect_after_load.take() {
-                                tab.pending_reselect = Some(names);
+                            self.meta_engine.fill(&d.snap, gen_id);
+                            if let Some(names) = d.reselect_after_load.take() {
+                                d.pending_reselect = Some(names);
                             }
-                            if let Ok(mut s) = tab.snap.write() {
+                            if let Ok(mut s) = d.snap.write() {
                                 s.finish();
                             }
                             // A watcher event deferred during this scan —
                             // run exactly one trailing rescan.
-                            if std::mem::take(&mut tab.watcher_refresh_pending) {
+                            if std::mem::take(&mut d.watcher_refresh_pending) {
                                 rescan_idx = Some(i);
                             }
                         }
                     }
                     if let Some(i) = rescan_idx {
                         // Mirror refresh(): keep selection across the rescan.
-                        let (snap, path) = {
-                            let tab = &mut self.tabs[i];
-                            let s = tab.snap.read().unwrap();
-                            let names = tab.sel.selected_names(&s);
+                        let Some((snap, path)) = self.tabs[i].dir_mut().map(|d| {
+                            let s = d.snap.read().unwrap();
+                            let names = d.sel.selected_names(&s);
                             let path = s.path.clone();
                             drop(s);
-                            tab.reselect_after_load = Some(names);
-                            (tab.snap.clone(), path)
+                            d.reselect_after_load = Some(names);
+                            (d.snap.clone(), path)
+                        }) else {
+                            continue;
                         };
                         let g = self.enum_engine.navigate(&snap, path);
-                        self.tabs[i].gen_id = g;
+                        if let Some(d) = self.tabs[i].dir_mut() {
+                            d.gen_id = g;
+                        }
                     }
                 }
                 EnumEvent::Error { gen_id, message } => {
-                    let cur = self.current_tab().gen_id;
-                    if gen_id == cur {
+                    let cur = self.current_dir().map(|d| d.gen_id);
+                    if cur == Some(gen_id) {
                         self.toast(format!("Cannot open folder: {message}"));
                     }
                 }
@@ -1419,13 +1568,16 @@ impl FluxApp {
                 }
                 MetaEvent::Finished { gen_id } => {
                     for tab in &mut self.tabs {
-                        if tab.gen_id == gen_id
+                        let Some(d) = tab.dir_mut() else {
+                            continue;
+                        };
+                        if d.gen_id == gen_id
                             && matches!(
-                                tab.snap.read().map(|s| s.sort.key),
+                                d.snap.read().map(|s| s.sort.key),
                                 Ok(SortKey::Size | SortKey::Modified)
                             )
                         {
-                            self.compute.rebuild(&tab.snap, gen_id);
+                            self.compute.rebuild(&d.snap, gen_id);
                         }
                     }
                     ctx.request_repaint();
@@ -1453,10 +1605,13 @@ impl FluxApp {
         for ev in self.size_engine.drain_events().collect::<Vec<_>>() {
             if let flux_core::SizeEvent::Done { gen_id, .. } = ev {
                 for tab in &mut self.tabs {
-                    if tab.gen_id == gen_id
-                        && matches!(tab.snap.read().map(|s| s.sort.key), Ok(SortKey::Size))
+                    let Some(d) = tab.dir_mut() else {
+                        continue;
+                    };
+                    if d.gen_id == gen_id
+                        && matches!(d.snap.read().map(|s| s.sort.key), Ok(SortKey::Size))
                     {
-                        self.compute.rebuild(&tab.snap, gen_id);
+                        self.compute.rebuild(&d.snap, gen_id);
                     }
                 }
                 ctx.request_repaint();
@@ -1467,11 +1622,14 @@ impl FluxApp {
         for ev in compute_events {
             if let ComputeEvent::ViewReady { gen_id } = ev {
                 for tab in &mut self.tabs {
-                    if tab.gen_id == gen_id
-                        && let Some(names) = tab.pending_reselect.take()
+                    let Some(d) = tab.dir_mut() else {
+                        continue;
+                    };
+                    if d.gen_id == gen_id
+                        && let Some(names) = d.pending_reselect.take()
                     {
-                        let s = tab.snap.read().unwrap();
-                        tab.sel.reselect_names(&s, &names);
+                        let s = d.snap.read().unwrap();
+                        d.sel.reselect_names(&s, &names);
                     }
                 }
                 ctx.request_repaint();
@@ -1489,15 +1647,16 @@ impl FluxApp {
             // An enumeration already running for this tab will observe
             // the mid-write state; restarting it on every burst starves
             // a large, actively-written directory forever. Flag one
-            // trailing refresh to run at Finished instead.
+            // trailing refresh to run at Finished instead. Application
+            // tabs have no watched dir — ignore the event entirely.
             let loading = self
-                .current_tab()
-                .snap
-                .read()
-                .map(|s| s.state.is_loading())
+                .current_dir()
+                .and_then(|d| d.snap.read().ok().map(|s| s.state.is_loading()))
                 .unwrap_or(false);
             if loading {
-                self.current_tab_mut().watcher_refresh_pending = true;
+                if let Some(d) = self.current_dir_mut() {
+                    d.watcher_refresh_pending = true;
+                }
             } else {
                 self.refresh();
             }
@@ -1580,20 +1739,20 @@ impl FluxApp {
         if got_hits {
             ctx.request_repaint();
         }
-        // Bulk Rename preview: debounced recompute on the worker thread,
-        // stale-generation results dropped.
-        if let Screen::BulkRename(br) = &mut self.screen {
+        // Bulk Rename previews: debounced recompute on the worker thread,
+        // stale-generation results dropped. Every open workspace keeps
+        // its worker alive while its tab exists — not just the active one.
+        for tab in &mut self.tabs {
+            let Some(br) = tab.bulk_rename_mut() else {
+                continue;
+            };
             if br.dirty
                 && br.plan_rx.is_none()
                 && br.last_edit.elapsed() > Duration::from_millis(220)
             {
                 br.recompute_async();
             }
-            if br.poll_plan() {
-                ctx.request_repaint();
-            } else if br.plan_stale {
-                // Repaint again soon so the stale-plan state can't linger
-                // if the worker finishes between event-driven frames.
+            if br.poll_plan() || br.plan_stale {
                 ctx.request_repaint_after(Duration::from_millis(50));
             }
         }
@@ -1643,19 +1802,23 @@ impl FluxApp {
             "toggle_hidden" => self.toggle_hidden(),
             "refresh" => self.refresh(),
             "focus_address" => {
-                self.address_edit = Some(self.current_path().display().to_string());
-                self.focus_address = true;
+                if let Some(p) = self.current_path() {
+                    self.address_edit = Some(p.display().to_string());
+                    self.focus_address = true;
+                }
             }
-            "focus_filter" => self.focus_filter = true,
-            "new_folder" => {
+            "focus_filter" if self.current_dir().is_some() => {
+                self.focus_filter = true;
+            }
+            "new_folder" if self.current_dir().is_some() => {
                 self.dialog = Dialog::NewFolder {
                     input: "New Folder".into(),
-                }
+                };
             }
-            "new_file" => {
+            "new_file" if self.current_dir().is_some() => {
                 self.dialog = Dialog::NewFile {
                     input: "untitled".into(),
-                }
+                };
             }
             "bulk_rename" => {
                 let paths = self.actionable_paths();
@@ -1677,12 +1840,13 @@ impl FluxApp {
             }
             "duplicate" => self.duplicate_selected(),
             "open_terminal" => {
-                let p = self.current_path();
-                if let Err(e) = flux_platform::open_in_terminal(&p) {
+                if let Some(p) = self.current_path()
+                    && let Err(e) = flux_platform::open_in_terminal(&p)
+                {
                     self.toast(format!("Terminal: {e}"));
                 }
             }
-            "toggle_search" => {
+            "toggle_search" if self.current_dir().is_some() => {
                 self.search_ui.active = !self.search_ui.active;
                 if self.search_ui.active {
                     self.focus_filter = true;
@@ -1711,5 +1875,182 @@ fn sort_from_settings(s: &Settings) -> SortSpec {
             _ => flux_core::SortKey::Name,
         },
         ..SortSpec::default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Settings with zero restored tabs → one empty-state app.
+    fn app() -> FluxApp {
+        let mut s = Settings::default();
+        s.tabs.clear();
+        FluxApp::from_settings(s)
+    }
+
+    #[test]
+    fn opens_one_dir_tab_at_home() {
+        let a = app();
+        assert_eq!(a.tabs.len(), 1);
+        assert!(a.current_dir().is_some());
+    }
+
+    #[test]
+    fn settings_tab_is_a_singleton() {
+        let mut a = app();
+        a.open_settings();
+        assert_eq!(a.tabs.len(), 2);
+        assert!(a.current_tab().settings().is_some());
+        // Second open focuses the existing tab instead of duplicating.
+        a.open_settings();
+        assert_eq!(a.tabs.len(), 2);
+        assert_eq!(a.active, 1);
+    }
+
+    #[test]
+    fn workspace_state_survives_tab_switching() {
+        let mut a = app();
+        a.open_settings();
+        a.current_tab_mut().settings_mut().unwrap().query = "theme".into();
+        a.current_tab_mut().settings_mut().unwrap().category =
+            crate::settings_page::Category::Appearance;
+        a.activate_tab(0); // back to the directory
+        assert!(a.current_dir().is_some());
+        a.open_settings(); // singleton focus — same tab, same state
+        let sui = a.current_tab().settings().unwrap();
+        assert_eq!(sui.query, "theme");
+        assert_eq!(sui.category, crate::settings_page::Category::Appearance);
+    }
+
+    #[test]
+    fn bulk_rename_keeps_rules_and_sources_across_switches() {
+        let mut a = app();
+        a.open_bulk_rename(vec![PathBuf::from("/tmp/x"), PathBuf::from("/tmp/y")]);
+        {
+            let br = a.current_tab_mut().bulk_rename_mut().unwrap();
+            br.find = "old".into();
+            br.replace = "new".into();
+        }
+        a.activate_tab(0);
+        a.activate_tab(1);
+        let br = a.current_tab().bulk_rename().unwrap();
+        assert_eq!(br.sources.len(), 2);
+        assert_eq!(br.find, "old");
+        assert_eq!(br.replace, "new");
+    }
+
+    #[test]
+    fn dir_only_ops_are_inert_on_workspace_tabs() {
+        let mut a = app();
+        a.open_settings();
+        assert!(a.current_dir().is_none());
+        assert!(a.current_path().is_none());
+        assert!(a.current_snap().is_none());
+        assert!(a.selected_paths().is_empty());
+        assert!(a.focused_path().is_none());
+        // None of these may panic or fake a target on a workspace tab.
+        a.refresh();
+        a.set_filter("x".into());
+        a.go_up();
+        a.go_back();
+        a.go_forward();
+        a.open_entry(flux_core::EntryIdx::MAX);
+        assert_eq!(a.active, 1); // still on the Settings tab
+    }
+
+    #[test]
+    fn navigate_from_workspace_lands_on_a_dir_tab() {
+        let mut a = app();
+        let home = flux_platform::home_dir();
+        a.open_settings();
+        a.navigate(home.clone());
+        // Navigation retargets the most recent directory tab, and the
+        // workspace remains open behind it.
+        assert_eq!(a.tabs.len(), 2);
+        assert!(a.current_dir().is_some());
+        assert!(a.tabs[1].settings().is_some());
+    }
+
+    #[test]
+    fn esc_leaves_workspace_without_losing_it() {
+        let mut a = app();
+        a.open_settings();
+        a.leave_workspace();
+        assert!(a.current_dir().is_some());
+        assert_eq!(a.tabs.len(), 2); // tab still open
+    }
+
+    #[test]
+    fn close_workspace_tab_returns_to_dir() {
+        let mut a = app();
+        a.open_settings();
+        a.close_tab(1);
+        assert_eq!(a.tabs.len(), 1);
+        assert!(a.current_dir().is_some());
+    }
+
+    #[test]
+    fn closing_last_tab_reopens_home() {
+        let mut a = app();
+        a.close_tab(0);
+        assert_eq!(a.tabs.len(), 1);
+        assert!(a.current_dir().is_some());
+        assert_eq!(a.current_path().unwrap(), flux_platform::home_dir());
+    }
+
+    #[test]
+    fn pending_rename_plan_asks_before_closing() {
+        let mut a = app();
+        a.open_bulk_rename(vec![PathBuf::from("/tmp/x")]);
+        {
+            let br = a.current_tab_mut().bulk_rename_mut().unwrap();
+            // Forge a ready action — close_tab only guards Ready plans.
+            br.plan.push(flux_operations::RenameAction {
+                src: PathBuf::from("/tmp/x"),
+                dst: PathBuf::from("/tmp/y"),
+                status: flux_operations::RenameStatus::Ready,
+            });
+        }
+        let idx = a.active;
+        a.close_tab(idx);
+        assert!(matches!(a.dialog, Dialog::ConfirmCloseTab { .. }));
+        assert_eq!(a.tabs.len(), 2); // still open
+        a.force_close_tab(idx);
+        assert_eq!(a.tabs.len(), 1);
+    }
+
+    #[test]
+    fn only_dir_tabs_persist_to_settings() {
+        let mut a = app();
+        a.open_settings();
+        a.open_bulk_rename(vec![PathBuf::from("/tmp/x")]);
+        a.save_settings();
+        assert_eq!(a.settings.tabs.len(), 1);
+        assert!(a.settings.tabs[0].is_absolute() || a.settings.tabs[0] == PathBuf::new());
+    }
+
+    #[test]
+    fn tab_titles_and_glyphs_distinguish_workspaces() {
+        let mut a = app();
+        a.open_settings();
+        a.open_bulk_rename(vec![PathBuf::from("/tmp/x")]);
+        assert_eq!(a.tabs[0].glyph(), crate::glyphs::Glyph::Folder);
+        assert_eq!(a.tabs[1].glyph(), crate::glyphs::Glyph::Gear);
+        assert_eq!(a.tabs[1].title(), "Settings");
+        assert_eq!(a.tabs[2].glyph(), crate::glyphs::Glyph::Pencil);
+        assert_eq!(a.tabs[2].title(), "Bulk Rename");
+    }
+
+    #[test]
+    fn dir_tab_state_survives_workspace_switching() {
+        let mut a = app();
+        // Seed a marker into tab 0's selection state.
+        if let Some(d) = a.current_dir_mut() {
+            d.filter = "marker".into();
+        }
+        a.open_settings();
+        a.activate_tab(0);
+        assert_eq!(a.current_dir().unwrap().filter, "marker");
     }
 }

@@ -10,7 +10,7 @@ use crate::glyphs::{self, Glyph};
 use crate::theme::Palette;
 use crate::widgets::{self, sp};
 
-#[derive(Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
 pub enum Category {
     #[default]
     Appearance,
@@ -207,8 +207,8 @@ fn matching(query: &str) -> Vec<&'static SettingMeta> {
         .collect()
 }
 
-/// The full page — rendered inside the central panel when
-/// `app.screen == Screen::Settings`.
+/// The full page — rendered inside the central panel while the active
+/// tab is `TabContent::Settings`.
 pub fn page(app: &mut FluxApp, ui: &mut egui::Ui) {
     let pal = Palette::of(&ui.style().visuals);
     let ctx = ui.ctx().clone();
@@ -218,7 +218,7 @@ pub fn page(app: &mut FluxApp, ui: &mut egui::Ui) {
     ui.horizontal(|ui| {
         if back_button(ui, &pal, "Back to files (Esc)").clicked() {
             app.save_settings();
-            app.close_screen();
+            app.leave_workspace();
             return;
         }
         ui.add_space(sp::SM);
@@ -230,7 +230,7 @@ pub fn page(app: &mut FluxApp, ui: &mut egui::Ui) {
         );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let width = ui.available_width().clamp(120.0, 240.0);
-            if let crate::app::Screen::Settings(sui) = &mut app.screen {
+            if let Some(sui) = app.current_tab_mut().settings_mut() {
                 let r = widgets::text_field(ui, &mut sui.query, "Search settings", width);
                 if r.changed() {
                     r.request_focus();
@@ -240,10 +240,7 @@ pub fn page(app: &mut FluxApp, ui: &mut egui::Ui) {
     });
     ui.add_space(sp::MD);
 
-    let Some(sui) = (match &mut app.screen {
-        crate::app::Screen::Settings(s) => Some(s),
-        _ => None,
-    }) else {
+    let Some(sui) = app.current_tab_mut().settings_mut() else {
         return;
     };
     let query = sui.query.clone();
@@ -260,7 +257,7 @@ pub fn page(app: &mut FluxApp, ui: &mut egui::Ui) {
                 .show_ui(ui, |ui| {
                     for c in Category::ALL {
                         if ui.selectable_label(*c == category, c.label()).clicked()
-                            && let crate::app::Screen::Settings(s) = &mut app.screen
+                            && let Some(s) = app.current_tab_mut().settings_mut()
                         {
                             s.category = *c;
                         }
@@ -296,7 +293,7 @@ pub fn page(app: &mut FluxApp, ui: &mut egui::Ui) {
                 let selected = !searching && *c == category;
                 let resp = nav_row(ui, &pal, *c, selected);
                 if resp.clicked()
-                    && let crate::app::Screen::Settings(s) = &mut app.screen
+                    && let Some(s) = app.current_tab_mut().settings_mut()
                 {
                     s.category = *c;
                     s.query.clear();
@@ -630,13 +627,13 @@ fn setting_row(
                 let mut v = app.settings.dirs_first;
                 if widgets::switch(ui, &mut v).changed() {
                     app.settings.dirs_first = v;
-                    let cur = {
-                        let s = app.current_tab().snap.read().unwrap();
-                        s.sort
-                    };
-                    let mut spec = cur;
-                    spec.dirs_first = v;
-                    app.set_sort(spec);
+                    // Live-apply to the most recent directory tab — the
+                    // Settings tab itself has no snapshot to resort.
+                    if let Some(d) = app.tabs.iter().rev().find_map(|t| t.dir()) {
+                        let mut spec = d.snap.read().unwrap().sort;
+                        spec.dirs_first = v;
+                        app.set_sort_last_dir(spec);
+                    }
                     app.settings_dirty_at = Some(std::time::Instant::now());
                 }
             },
@@ -955,11 +952,11 @@ fn advanced(app: &mut FluxApp, ui: &mut egui::Ui, ctx: &egui::Context, pal: &Pal
             "Restores every preference to its default — theme, fonts, view modes, sidebar, sort. Open tabs stay open.",
         ),
     );
-    let armed = matches!(&app.screen, crate::app::Screen::Settings(s) if s.reset_armed);
+    let armed = app.current_tab().settings().is_some_and(|s| s.reset_armed);
     ui.horizontal(|ui| {
         if !armed {
             if widgets::secondary_button(ui, "Reset all settings…").clicked()
-                && let crate::app::Screen::Settings(s) = &mut app.screen
+                && let Some(s) = app.current_tab_mut().settings_mut()
             {
                 s.reset_armed = true;
             }
@@ -981,12 +978,12 @@ fn advanced(app: &mut FluxApp, ui: &mut egui::Ui, ctx: &egui::Context, pal: &Pal
                 app.apply_ui_scale(ctx);
                 crate::theme::apply_theme(ctx, app.dark);
                 app.save_settings();
-                if let crate::app::Screen::Settings(s) = &mut app.screen {
+                if let Some(s) = app.current_tab_mut().settings_mut() {
                     s.reset_armed = false;
                 }
             }
             if widgets::ghost_button(ui, "Cancel").clicked()
-                && let crate::app::Screen::Settings(s) = &mut app.screen
+                && let Some(s) = app.current_tab_mut().settings_mut()
             {
                 s.reset_armed = false;
             }

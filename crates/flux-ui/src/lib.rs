@@ -33,8 +33,10 @@ use chrome::ChromeAction;
 impl FluxApp {
     /// First-frame init: start enumerating the active tab.
     fn ensure_started(&mut self) {
-        if self.current_tab().gen_id == 0 {
-            let path = self.current_path();
+        if self.current_dir().is_some_and(|d| d.gen_id == 0) {
+            let Some(path) = self.current_path() else {
+                return;
+            };
             self.navigate(path);
         }
     }
@@ -68,11 +70,12 @@ impl FluxApp {
                 self.address_edit = None;
             } else if !matches!(self.dialog, Dialog::None) {
                 self.dialog = Dialog::None;
-            } else if !matches!(self.screen, app::Screen::Explorer) {
-                // Full pages sit above the browser but below overlays —
-                // Esc leaves the page, flushing pending settings writes.
+            } else if self.current_dir().is_none() {
+                // Workspace tabs sit above the browser but below
+                // overlays — Esc returns to the nearest directory tab
+                // without closing the workspace (its state persists).
                 self.save_settings();
-                self.close_screen();
+                self.leave_workspace();
             } else if self.dragging.is_some() {
                 self.dragging = None;
             } else if self.sidebar_drag.is_some() {
@@ -80,16 +83,45 @@ impl FluxApp {
             } else if !self.filter_text.is_empty() {
                 self.filter_text.clear();
                 self.set_filter(String::new());
-            } else {
-                self.current_tab_mut().sel.clear();
+            } else if let Some(d) = self.current_dir_mut() {
+                d.sel.clear();
             }
             return;
         }
-        if self.palette_open
-            || !matches!(self.dialog, Dialog::None)
-            || !matches!(self.screen, app::Screen::Explorer)
+        if self.palette_open || !matches!(self.dialog, Dialog::None) {
+            return; // dialogs own the keyboard
+        }
+
+        // Tab-level shortcuts work from ANY workspace — browser standard.
         {
-            return; // dialogs and pages own the keyboard
+            let cmd = egui::Modifiers::COMMAND;
+            let shift = egui::Modifiers::SHIFT;
+            let (next_tab, prev_tab, new_tab, close_tab) = ctx.input_mut(|i| {
+                (
+                    i.consume_key(cmd | shift, Key::Tab),
+                    i.consume_key(cmd, Key::Tab),
+                    i.consume_key(cmd, Key::T),
+                    i.consume_key(cmd, Key::W),
+                )
+            });
+            let n_tabs = self.tabs.len();
+            if next_tab && n_tabs > 1 {
+                self.activate_tab((self.active + 1) % n_tabs);
+            }
+            if prev_tab && n_tabs > 1 {
+                self.activate_tab((self.active + n_tabs - 1) % n_tabs);
+            }
+            if new_tab {
+                self.new_tab();
+            }
+            if close_tab {
+                let a = self.active;
+                self.close_tab(a);
+            }
+        }
+
+        if self.current_dir().is_none() {
+            return; // workspace pages own the remaining keys
         }
         if ctx.egui_wants_keyboard_input() {
             return; // a text field is focused
@@ -105,8 +137,6 @@ impl FluxApp {
                 i.consume_key(cmd, K::V),
                 i.consume_key(cmd | shift, K::C),
                 i.consume_key(cmd, K::A),
-                i.consume_key(cmd, K::T),
-                i.consume_key(cmd, K::W),
                 i.consume_key(cmd, K::F),
                 i.consume_key(cmd, K::L),
                 i.consume_key(cmd, K::R),
@@ -146,8 +176,6 @@ impl FluxApp {
             paste,
             copy_paths,
             select_all,
-            new_tab,
-            close_tab,
             focus_filter,
             focus_address,
             refresh_h,
@@ -181,35 +209,11 @@ impl FluxApp {
             redo_y,
         ) = hits;
 
-        // Ctrl+Tab / Ctrl+Shift+Tab — cycle tabs (browser standard).
-        let (next_tab, prev_tab) = ctx.input_mut(|i| {
-            (
-                i.consume_key(cmd | shift, K::Tab),
-                i.consume_key(cmd, K::Tab),
-            )
-        });
-        let n_tabs = self.tabs.len();
-        if next_tab && n_tabs > 1 {
-            let i = (self.active + 1) % n_tabs;
-            self.activate_tab(i);
-        }
-        if prev_tab && n_tabs > 1 {
-            let i = (self.active + n_tabs - 1) % n_tabs;
-            self.activate_tab(i);
-        }
-
-        if new_tab {
-            self.new_tab();
-        }
-        if close_tab {
-            let a = self.active;
-            self.close_tab(a);
-        }
         if focus_filter {
             self.focus_filter = true;
         }
-        if focus_address {
-            self.address_edit = Some(self.current_path().display().to_string());
+        if focus_address && let Some(p) = self.current_path() {
+            self.address_edit = Some(p.display().to_string());
             self.focus_address = true;
         }
         if refresh_h || refresh_f5 {
@@ -232,8 +236,7 @@ impl FluxApp {
         if fwd {
             self.go_forward();
         }
-        if select_all {
-            let tab = self.current_tab_mut();
+        if select_all && let Some(tab) = self.current_dir_mut() {
             let s = tab.snap.read().unwrap();
             tab.sel.select_all(&s);
         }
@@ -251,8 +254,7 @@ impl FluxApp {
             self.clipboard.items = items;
             self.clipboard.cut = true;
         }
-        if paste {
-            let dest = self.current_path();
+        if paste && let Some(dest) = self.current_path() {
             self.submit_copy(dest);
         }
         if duplicate {
@@ -307,24 +309,22 @@ impl FluxApp {
         }
         if enter {
             // Open focused row or first selected entry.
-            let tab = self.current_tab();
-            let target = {
+            let target = self.current_dir().and_then(|tab| {
                 let s = tab.snap.read().unwrap();
                 tab.sel
                     .focus
                     .and_then(|r| s.row_index(r))
                     .or_else(|| tab.sel.ids.iter().next().copied())
-            };
+            });
             if let Some(idx) = target {
                 self.open_entry(idx);
             }
         }
         // Arrow/Page/Home/End keyboard navigation.
-        let page = {
-            let tab = self.current_tab();
-            let s = tab.snap.read().unwrap();
-            s.view_len()
-        };
+        let page = self
+            .current_dir()
+            .map(|tab| tab.snap.read().unwrap().view_len())
+            .unwrap_or(0);
         let step = if pgdn || pgup { 30 } else { 1 };
         // Grid/Gallery navigate by cells: vertical moves jump a whole
         // cell-row, horizontal moves walk one entry at a time.
@@ -333,8 +333,10 @@ impl FluxApp {
             flux_settings::ViewMode::Grid | flux_settings::ViewMode::Gallery
         );
         let vstep = if in_grid { self.grid_cols.max(1) } else { 1 };
-        let tab = self.current_tab_mut();
-        let cur = tab.sel.focus.unwrap_or(0);
+        let cur = self
+            .current_dir()
+            .and_then(|tab| tab.sel.focus)
+            .unwrap_or(0);
         let new_focus = if down || down_s {
             Some((cur + vstep).min(page.saturating_sub(1)))
         } else if up_k || up_s {
@@ -358,14 +360,15 @@ impl FluxApp {
             if page == 0 {
                 return;
             }
-            let tab = self.current_tab_mut();
-            let s = tab.snap.read().unwrap();
-            if down_s || up_s || left_s || right_s {
-                tab.sel.extend_to(&s, row);
-            } else {
-                tab.sel.select_row(&s, row);
+            if let Some(tab) = self.current_dir_mut() {
+                let s = tab.snap.read().unwrap();
+                if down_s || up_s || left_s || right_s {
+                    tab.sel.extend_to(&s, row);
+                } else {
+                    tab.sel.select_row(&s, row);
+                }
+                tab.scroll_to_row = Some(row);
             }
-            tab.scroll_to_row = Some(row);
         }
     }
 
@@ -574,7 +577,8 @@ impl eframe::App for FluxApp {
         self.terminal_input(&ctx);
         self.handle_keys(&ctx);
 
-        // OS file drop → copy into current dir.
+        // OS file drop → copy into current dir. Dropping onto a workspace
+        // tab has no destination — the payload is ignored, never faked.
         let dropped: Vec<PathBuf> = ctx.input(|i| {
             i.raw
                 .dropped_files
@@ -582,8 +586,9 @@ impl eframe::App for FluxApp {
                 .map(|f| f.path().to_path_buf())
                 .collect()
         });
-        if !dropped.is_empty() {
-            let dest = self.current_path();
+        if !dropped.is_empty()
+            && let Some(dest) = self.current_path()
+        {
             self.ops.submit(
                 flux_operations::OpKind::Copy {
                     sources: dropped,
@@ -658,9 +663,9 @@ impl eframe::App for FluxApp {
                 });
         }
         // Right-side preview pane (Alt+P) — after the side/bottom panels
-        // so it shares the central column's full height. Suppressed while
-        // a full page is open — it's dead space beside a workspace.
-        if self.settings.show_preview && matches!(self.screen, app::Screen::Explorer) {
+        // so it shares the central column's full height. Suppressed on
+        // workspace tabs — it's dead space beside Settings/Bulk Rename.
+        if self.settings.show_preview && self.current_dir().is_some() {
             let prev_frame = egui::Frame::default()
                 .fill(theme::chrome_fill(dark))
                 .inner_margin(egui::Margin::symmetric(12, 10));
@@ -676,10 +681,10 @@ impl eframe::App for FluxApp {
         }
         let mut row_action = view::RowAction::default();
         let central = egui::CentralPanel::default().show(ui, |ui| {
-            if matches!(self.screen, app::Screen::Settings(_)) {
+            if self.current_tab().settings().is_some() {
                 settings_page::page(self, ui);
                 None
-            } else if matches!(self.screen, app::Screen::BulkRename(_)) {
+            } else if self.current_tab().bulk_rename().is_some() {
                 rename_page::page(self, ui);
                 None
             } else if self.search_ui.active {
@@ -693,10 +698,9 @@ impl eframe::App for FluxApp {
                     self.open_entry(idx);
                 }
                 if let Some(idx) = row_act.open_new_tab {
-                    let p = {
-                        let s = self.current_tab().snap.read().unwrap();
-                        s.entry_path(idx)
-                    };
+                    let p = self
+                        .current_dir()
+                        .and_then(|d| d.snap.read().unwrap().entry_path(idx));
                     if let Some(p) = p
                         && p.is_dir()
                     {
@@ -713,24 +717,25 @@ impl eframe::App for FluxApp {
                     self.start_drag_row(row);
                 }
                 if let Some(row) = row_act.drop_row {
-                    let target = {
-                        let s = self.current_tab().snap.read().unwrap();
+                    let target = self.current_dir().and_then(|d| {
+                        let s = d.snap.read().unwrap();
                         s.row(row).map(|(_, e)| s.path.join(&e.name))
-                    };
+                    });
                     if let Some(t) = target {
                         act.drop_target = Some(t);
                     }
                 }
                 if let Some((row, pos)) = row_act.context {
                     // Ensure the row is selected before showing its menu.
-                    let tab = self.current_tab_mut();
-                    let is_sel = {
-                        let s = tab.snap.read().unwrap();
-                        s.row_index(row).is_some_and(|i| tab.sel.contains(i))
-                    };
-                    if !is_sel {
-                        let s = tab.snap.read().unwrap();
-                        tab.sel.select_row(&s, row);
+                    if let Some(tab) = self.current_dir_mut() {
+                        let is_sel = {
+                            let s = tab.snap.read().unwrap();
+                            s.row_index(row).is_some_and(|i| tab.sel.contains(i))
+                        };
+                        if !is_sel {
+                            let s = tab.snap.read().unwrap();
+                            tab.sel.select_row(&s, row);
+                        }
                     }
                     // Snapshot the OS clipboard once per menu open — the
                     // menu renders every frame and a live read would spawn
@@ -750,9 +755,11 @@ impl eframe::App for FluxApp {
 
         // Right-click on empty table space → background menu for the
         // current directory (Explorer's background menu equivalent).
+        // Workspace tabs have no directory context — no menu.
         let central_rect = central.response.rect;
         let had_row_ctx = central.inner.unwrap_or(false);
         if !had_row_ctx
+            && self.current_dir().is_some()
             && !self.search_ui.active
             && ctx.input(|i| i.pointer.secondary_clicked())
             && ctx
@@ -845,8 +852,9 @@ impl eframe::App for FluxApp {
             && ctx
                 .pointer_interact_pos()
                 .is_some_and(|p| central_rect.contains(p))
+            && let Some(d) = self.current_dir_mut()
         {
-            self.current_tab_mut().sel.clear();
+            d.sel.clear();
         }
 
         // --- Internal drag & drop ---
@@ -1006,7 +1014,7 @@ impl eframe::App for FluxApp {
         if act.toggle_hidden {
             self.toggle_hidden();
         }
-        if act.toggle_search {
+        if act.toggle_search && self.current_dir().is_some() {
             self.search_ui.active = !self.search_ui.active;
             if self.search_ui.active {
                 self.focus_filter = true;
@@ -1021,22 +1029,26 @@ impl eframe::App for FluxApp {
         if let Some(id) = act.cancel_op {
             self.ops.cancel(id);
         }
-        if act.paste {
-            let dest = self.current_path();
+        if act.paste
+            && let Some(dest) = self.current_path()
+        {
             self.submit_copy(dest);
         }
 
-        // Debounced recursive search trigger.
-        if self.search_ui.active
+        // Debounced recursive search trigger — directory tabs only.
+        if self.current_dir().is_some()
+            && self.search_ui.active
             && self.search_ui.dirty
             && self.search_ui.last_edit.elapsed() > Duration::from_millis(350)
         {
             self.search_ui.dirty = false;
             let text = self.filter_text.clone();
             self.search_ui.hits.clear();
-            if !text.is_empty() {
+            if !text.is_empty()
+                && let Some(root) = self.current_path()
+            {
                 self.search_engine.search(flux_search::SearchQuery {
-                    root: self.current_path(),
+                    root,
                     text,
                     case_sensitive: false,
                     regex: false,
@@ -1060,11 +1072,13 @@ impl eframe::App for FluxApp {
 
         // Slow tick while anything streams so spinners/progress animate.
         let loading = self
-            .current_tab()
-            .snap
-            .read()
-            .map(|s| s.state.is_loading())
-            .unwrap_or(false);
+            .current_dir()
+            .and_then(|d| d.snap.read().ok().map(|s| s.state.is_loading()))
+            .unwrap_or(false)
+            || self
+                .current_tab()
+                .bulk_rename()
+                .is_some_and(|b| b.plan_stale);
         if loading || !self.ops.active_ops().is_empty() || self.search_ui.active {
             ctx.request_repaint_after(Duration::from_millis(100));
         }
@@ -1080,12 +1094,15 @@ impl eframe::App for FluxApp {
                         true
                     }
                     "rename" => {
-                        let paths: Vec<PathBuf> = {
-                            let s = self.current_tab().snap.read().unwrap();
-                            (0..s.view_len().min(60))
-                                .filter_map(|i| s.row(i).map(|(_, e)| s.path.join(&e.name)))
-                                .collect()
-                        };
+                        let paths: Vec<PathBuf> = self
+                            .current_dir()
+                            .map(|d| {
+                                let s = d.snap.read().unwrap();
+                                (0..s.view_len().min(60))
+                                    .filter_map(|i| s.row(i).map(|(_, e)| s.path.join(&e.name)))
+                                    .collect()
+                            })
+                            .unwrap_or_default();
                         if paths.is_empty() {
                             false
                         } else {
@@ -1098,6 +1115,30 @@ impl eframe::App for FluxApp {
                 if ok && let Some(sc) = &mut self.shot {
                     sc.screen_done = true;
                 }
+            }
+            // Optional context-menu capture — open once the screen is
+            // up so the menu renders for the final frames.
+            let menu = self
+                .shot
+                .as_ref()
+                .and_then(|s| s.screen_done.then(|| s.menu.clone()).flatten());
+            match menu.as_deref() {
+                Some("row") if self.context_menu_pos.is_none() => {
+                    if let Some(tab) = self.current_dir_mut() {
+                        let has = tab.snap.read().unwrap().view_len() > 0;
+                        if has {
+                            let s = tab.snap.read().unwrap();
+                            tab.sel.select_row(&s, 0);
+                        }
+                    }
+                    self.ext_clipboard = flux_platform::clipboard::read_files();
+                    self.context_menu_pos = Some(egui::pos2(320.0, 160.0));
+                }
+                Some("bg") if self.bg_menu_pos.is_none() => {
+                    self.ext_clipboard = flux_platform::clipboard::read_files();
+                    self.bg_menu_pos = Some(egui::pos2(320.0, 160.0));
+                }
+                _ => {}
             }
             if let Some(sc) = &mut self.shot
                 && sc.screen_done

@@ -122,7 +122,10 @@ pub fn file_table(app: &mut FluxApp, ui: &mut egui::Ui) -> RowAction {
     let pal = Palette::of(&ui.style().visuals);
     let row_h = app.density.row_height();
     let widths = app.settings.column_widths;
-    let snap = app.current_snap();
+    // Only called for directory tabs — workspace tabs render elsewhere.
+    let Some(snap) = app.current_snap() else {
+        return action;
+    };
 
     let (view_len, loading, state_label, sort_spec, show_hidden) = {
         let s = snap.read().unwrap();
@@ -209,10 +212,17 @@ pub fn file_table(app: &mut FluxApp, ui: &mut egui::Ui) -> RowAction {
         };
     }
 
-    let focus_row = app.current_tab().sel.focus;
-    let scroll_to = app.current_tab_mut().scroll_to_row.take();
+    let (focus_row, scroll_to) = {
+        let Some(d) = app.current_dir_mut() else {
+            return action;
+        };
+        (d.sel.focus, d.scroll_to_row.take())
+    };
     // Borrow the selection once; row closure does O(1) lookups, no clones.
-    let sel = &app.tabs[app.active].sel;
+    let Some(dtab) = app.current_dir() else {
+        return action;
+    };
+    let sel = &dtab.sel;
     let egui_ctx = ui.ctx().clone();
     let icons = app.icons.clone();
     let thumbs = app.thumbs.clone();
@@ -429,8 +439,9 @@ pub fn file_table(app: &mut FluxApp, ui: &mut egui::Ui) -> RowAction {
 
 /// Apply a RowAction to the app's selection state; `open` handled by caller.
 pub fn apply_click(app: &mut FluxApp, action: &RowAction) {
-    if let Some(row) = action.click {
-        let tab = app.current_tab_mut();
+    if let Some(row) = action.click
+        && let Some(tab) = app.current_dir_mut()
+    {
         let s = tab.snap.read().unwrap();
         if action.click_shift {
             tab.sel.range_to(&s, row);
@@ -447,10 +458,12 @@ pub fn apply_click(app: &mut FluxApp, action: &RowAction) {
 fn compact_list(app: &mut FluxApp, ui: &mut egui::Ui, pal: &Palette) -> RowAction {
     let mut action = RowAction::default();
     let row_h = app.density.row_height() * 0.82;
-    let snap = app.current_snap();
+    let Some(snap) = app.current_snap() else {
+        return action;
+    };
     let view_len = snap.read().map(|s| s.view_len()).unwrap_or(0);
-    let scroll_to = app.current_tab_mut().scroll_to_row.take();
-    let sel = &app.tabs[app.active].sel;
+    let scroll_to = app.current_dir_mut().and_then(|d| d.scroll_to_row.take());
+    let sel = app.current_dir().map(|d| &d.sel);
     let egui_ctx = ui.ctx().clone();
     let icons = app.icons.clone();
     let drag_active = app.dragging.is_some();
@@ -488,7 +501,7 @@ fn compact_list(app: &mut FluxApp, ui: &mut egui::Ui, pal: &Palette) -> RowActio
             };
             vis_min = vis_min.min(idx);
             vis_max = vis_max.max(idx);
-            row.set_selected(sel.contains(idx));
+            row.set_selected(sel.is_some_and(|s| s.contains(idx)));
             let ghost = if hidden { 0.55 } else { 1.0 };
             row.col(|ui| {
                 let rect = ui.available_rect_before_wrap();
@@ -559,15 +572,20 @@ fn icon_grid(app: &mut FluxApp, ui: &mut egui::Ui, pal: &Palette, cell_w: f32) -
     let mut action = RowAction::default();
     let gallery = cell_w > 120.0;
     let cell_h = cell_w + 20.0; // icon area + one name line
-    let snap = app.current_snap();
+    let Some(snap) = app.current_snap() else {
+        return action;
+    };
     let view_len = snap.read().map(|s| s.view_len()).unwrap_or(0);
     let avail_w = ui.available_width().max(cell_w);
     let cols = ((avail_w / cell_w).floor() as usize).max(1);
     app.grid_cols = cols;
     let n_rows = view_len.div_ceil(cols);
 
-    let scroll_to = app.current_tab_mut().scroll_to_row.take().map(|r| r / cols);
-    let sel = &app.tabs[app.active].sel;
+    let scroll_to = app
+        .current_dir_mut()
+        .and_then(|d| d.scroll_to_row.take())
+        .map(|r| r / cols);
+    let sel = app.current_dir().map(|d| &d.sel);
     let egui_ctx = ui.ctx().clone();
     let icons = app.icons.clone();
     let thumbs = app.thumbs.clone();
@@ -623,7 +641,7 @@ fn icon_grid(app: &mut FluxApp, ui: &mut egui::Ui, pal: &Palette, cell_w: f32) -
                             Vec2::new(cell_w, cell_h),
                             Sense::click_and_drag(),
                         );
-                        let selected = sel.contains(idx);
+                        let selected = sel.is_some_and(|s| s.contains(idx));
                         if selected || resp.hovered() {
                             let (fill, stroke) = if selected {
                                 (visuals.selection.bg_fill, visuals.selection.stroke)

@@ -71,6 +71,27 @@ pub fn item_sc_enabled(ui: &mut Ui, label: &str, shortcut: &str, enabled: bool) 
     item_full(ui, label, Some(shortcut), enabled, None, false)
 }
 
+/// Icon item that greys out when `enabled` is false.
+pub fn item_icon_enabled(
+    ui: &mut Ui,
+    icon: crate::glyphs::Glyph,
+    label: &str,
+    enabled: bool,
+) -> Response {
+    item_full(ui, label, None, enabled, Some(icon), false)
+}
+
+/// Icon + shortcut item that greys out when `enabled` is false.
+pub fn item_icon_sc_enabled(
+    ui: &mut Ui,
+    icon: crate::glyphs::Glyph,
+    label: &str,
+    shortcut: &str,
+    enabled: bool,
+) -> Response {
+    item_full(ui, label, Some(shortcut), enabled, Some(icon), false)
+}
+
 fn item_full(
     ui: &mut Ui,
     label: &str,
@@ -146,6 +167,25 @@ pub fn item_check(ui: &mut Ui, label: &str, checked: bool) -> Response {
 /// The label is painted at the same x as item labels so the leading
 /// icon column lines up across rows.
 pub fn submenu<R>(ui: &mut Ui, label: &str, add_contents: impl FnOnce(&mut Ui) -> R) {
+    submenu_impl(ui, label, None, add_contents);
+}
+
+/// Submenu trigger with a painted glyph in the icon column.
+pub fn submenu_icon<R>(
+    ui: &mut Ui,
+    icon: crate::glyphs::Glyph,
+    label: &str,
+    add_contents: impl FnOnce(&mut Ui) -> R,
+) {
+    submenu_impl(ui, label, Some(icon), add_contents);
+}
+
+fn submenu_impl<R>(
+    ui: &mut Ui,
+    label: &str,
+    icon: Option<crate::glyphs::Glyph>,
+    add_contents: impl FnOnce(&mut Ui) -> R,
+) {
     let w = ui.available_width();
     let btn = Button::new(RichText::new(""))
         .min_size(Vec2::new(w, 30.0))
@@ -162,6 +202,13 @@ pub fn submenu<R>(ui: &mut Ui, label: &str, add_contents: impl FnOnce(&mut Ui) -
         sub.set_max_width(210.0);
         add_contents(sub)
     });
+    if let Some(g) = icon {
+        let ir = egui::Rect::from_center_size(
+            egui::pos2(r.rect.left() + 13.0, r.rect.center().y),
+            Vec2::splat(14.0),
+        );
+        crate::glyphs::paint_glyph(ui.painter(), ir, g, ui.visuals().text_color());
+    }
     ui.painter().text(
         egui::pos2(r.rect.left() + 26.0, r.rect.center().y),
         egui::Align2::LEFT_CENTER,
