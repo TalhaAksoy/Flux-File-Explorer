@@ -278,8 +278,12 @@ fn bundled_bytes(key: &str) -> Option<&'static [u8]> {
         "jetbrains-nerd" => include_bytes!("../fonts/JetBrainsMonoNerdFont-Regular.ttf"),
         "meslo-nerd" => include_bytes!("../fonts/MesloLGSNerdFont-Regular.ttf"),
         "jetbrains" => include_bytes!("../fonts/JetBrainsMono-Regular.ttf"),
+        "space-mono" => include_bytes!("../fonts/SpaceMono-Regular.ttf"),
+        "ubuntu-mono" => include_bytes!("../fonts/UbuntuMono-Regular.ttf"),
+        "courier-prime" => include_bytes!("../fonts/CourierPrime-Regular.ttf"),
         "fira-sans" => include_bytes!("../fonts/FiraSans-Regular.ttf"),
         "ubuntu" => include_bytes!("../fonts/Ubuntu-Regular.ttf"),
+        "lato" => include_bytes!("../fonts/Lato-Regular.ttf"),
         _ => return None,
     })
 }
@@ -288,9 +292,31 @@ fn bundled_bytes(key: &str) -> Option<&'static [u8]> {
 pub fn is_bundled(key: &str) -> bool {
     matches!(
         key,
-        "jetbrains-nerd" | "meslo-nerd" | "jetbrains" | "fira-sans" | "ubuntu"
+        "jetbrains-nerd"
+            | "meslo-nerd"
+            | "jetbrains"
+            | "space-mono"
+            | "ubuntu-mono"
+            | "courier-prime"
+            | "fira-sans"
+            | "ubuntu"
+            | "lato"
     )
 }
+
+/// Every bundled key — the preview-family registration loop and tests
+/// iterate this.
+const BUNDLED_KEYS: &[&str] = &[
+    "jetbrains-nerd",
+    "meslo-nerd",
+    "jetbrains",
+    "space-mono",
+    "ubuntu-mono",
+    "courier-prime",
+    "fira-sans",
+    "ubuntu",
+    "lato",
+];
 
 /// egui family names under which bundled fonts are always registered —
 /// lets pickers render each font name in its own typeface for free
@@ -308,13 +334,7 @@ pub fn load_fonts(ui_key: &str, mono_key: &str) -> egui::FontDefinitions {
     let mut defs = egui::FontDefinitions::default();
     // Register every bundled font under its own preview family — the
     // bytes live in the binary, so this is pointer + len, zero copy.
-    for key in [
-        "jetbrains-nerd",
-        "meslo-nerd",
-        "jetbrains",
-        "fira-sans",
-        "ubuntu",
-    ] {
+    for key in BUNDLED_KEYS {
         if let Some(bytes) = bundled_bytes(key) {
             let name = preview_family(key).to_string();
             defs.font_data.insert(
@@ -406,6 +426,13 @@ pub const UI_FONTS: &[FontChoice] = &[
         nerd: false,
     },
     FontChoice {
+        key: "lato",
+        label: "Lato",
+        patterns: &["latoregular", "lato"],
+        exclude: STYLE_WORDS,
+        nerd: false,
+    },
+    FontChoice {
         key: "inter",
         label: "Inter",
         patterns: &["inter"],
@@ -437,6 +464,55 @@ pub const UI_FONTS: &[FontChoice] = &[
         key: "cantarell",
         label: "Cantarell",
         patterns: &["cantarell"],
+        exclude: STYLE_WORDS,
+        nerd: false,
+    },
+    FontChoice {
+        key: "open-sans",
+        label: "Open Sans",
+        patterns: &["opensansregular", "opensans"],
+        exclude: STYLE_WORDS,
+        nerd: false,
+    },
+    FontChoice {
+        key: "source-sans",
+        label: "Source Sans 3",
+        patterns: &["sourcesans3", "sourcesanspro", "sourcesans"],
+        exclude: STYLE_WORDS,
+        nerd: false,
+    },
+    FontChoice {
+        key: "ibmplex-sans",
+        label: "IBM Plex Sans",
+        patterns: &["ibmplexsans"],
+        exclude: STYLE_WORDS,
+        nerd: false,
+    },
+    FontChoice {
+        key: "manrope",
+        label: "Manrope",
+        patterns: &["manrope"],
+        exclude: STYLE_WORDS,
+        nerd: false,
+    },
+    FontChoice {
+        key: "work-sans",
+        label: "Work Sans",
+        patterns: &["worksans"],
+        exclude: STYLE_WORDS,
+        nerd: false,
+    },
+    FontChoice {
+        key: "public-sans",
+        label: "Public Sans",
+        patterns: &["publicsans"],
+        exclude: STYLE_WORDS,
+        nerd: false,
+    },
+    FontChoice {
+        key: "geist",
+        label: "Geist",
+        patterns: &["geist"],
         exclude: STYLE_WORDS,
         nerd: false,
     },
@@ -496,6 +572,27 @@ pub const MONO_FONTS: &[FontChoice] = &[
         nerd: false,
     },
     FontChoice {
+        key: "space-mono",
+        label: "Space Mono",
+        patterns: &["spacemono"],
+        exclude: MONO_STYLE_WORDS,
+        nerd: false,
+    },
+    FontChoice {
+        key: "ubuntu-mono",
+        label: "Ubuntu Mono",
+        patterns: &["ubuntumono"],
+        exclude: MONO_STYLE_WORDS,
+        nerd: false,
+    },
+    FontChoice {
+        key: "courier-prime",
+        label: "Courier Prime",
+        patterns: &["courierprime"],
+        exclude: MONO_STYLE_WORDS,
+        nerd: false,
+    },
+    FontChoice {
         key: "firacode-nerd",
         label: "FiraCode Nerd Font",
         patterns: &["firacodenerdfontmono", "firacodenerdfont"],
@@ -513,6 +610,27 @@ pub const MONO_FONTS: &[FontChoice] = &[
         key: "cascadia-nerd",
         label: "CascadiaCode Nerd Font",
         patterns: &["caskaydiamononerdfont", "caskaydiacodenerdfont"],
+        exclude: MONO_STYLE_WORDS,
+        nerd: true,
+    },
+    FontChoice {
+        key: "victor-nerd",
+        label: "Victor Mono Nerd Font",
+        patterns: &["victormononerdfontmono", "victormononerdfont"],
+        exclude: MONO_STYLE_WORDS,
+        nerd: true,
+    },
+    FontChoice {
+        key: "iosevka-nerd",
+        label: "IosevkaTerm Nerd Font",
+        patterns: &["iosevkatermnerdfont", "iosevkanerdfont"],
+        exclude: MONO_STYLE_WORDS,
+        nerd: true,
+    },
+    FontChoice {
+        key: "sauce-nerd",
+        label: "SauceCodePro Nerd Font",
+        patterns: &["saucecodepronerd"],
         exclude: MONO_STYLE_WORDS,
         nerd: true,
     },
@@ -552,16 +670,82 @@ pub const MONO_FONTS: &[FontChoice] = &[
         nerd: false,
     },
     FontChoice {
-        key: "dejavu-mono",
-        label: "DejaVu Sans Mono",
-        patterns: &["dejavusansmono"],
+        key: "ibmplex-mono",
+        label: "IBM Plex Mono",
+        patterns: &["ibmplexmono"],
         exclude: MONO_STYLE_WORDS,
         nerd: false,
     },
     FontChoice {
-        key: "ubuntu-mono",
-        label: "Ubuntu Mono",
-        patterns: &["ubuntumono"],
+        key: "roboto-mono",
+        label: "Roboto Mono",
+        patterns: &["robotomono"],
+        exclude: MONO_STYLE_WORDS,
+        nerd: false,
+    },
+    FontChoice {
+        key: "intel-one-mono",
+        label: "Intel One Mono",
+        patterns: &["intelonemono"],
+        exclude: MONO_STYLE_WORDS,
+        nerd: false,
+    },
+    FontChoice {
+        key: "inconsolata",
+        label: "Inconsolata",
+        patterns: &["inconsolata"],
+        exclude: MONO_STYLE_WORDS,
+        nerd: false,
+    },
+    FontChoice {
+        key: "geist-mono",
+        label: "Geist Mono",
+        patterns: &["geistmono"],
+        exclude: MONO_STYLE_WORDS,
+        nerd: false,
+    },
+    FontChoice {
+        key: "commit-mono",
+        label: "Commit Mono",
+        patterns: &["commitmono"],
+        exclude: MONO_STYLE_WORDS,
+        nerd: false,
+    },
+    FontChoice {
+        key: "monaco",
+        label: "Monaco",
+        patterns: &["monaco"],
+        exclude: MONO_STYLE_WORDS,
+        nerd: false,
+    },
+    FontChoice {
+        key: "courier-new",
+        label: "Courier New",
+        patterns: &["cour"],
+        exclude: &[
+            "bold",
+            "italic",
+            "oblique",
+            "light",
+            "thin",
+            "black",
+            "extra",
+            "hairline",
+            "medium",
+            "propo",
+            "condensed",
+            "display",
+            "semi",
+            "demi",
+            "retina",
+            "prime",
+        ],
+        nerd: false,
+    },
+    FontChoice {
+        key: "dejavu-mono",
+        label: "DejaVu Sans Mono",
+        patterns: &["dejavusansmono"],
         exclude: MONO_STYLE_WORDS,
         nerd: false,
     },
@@ -713,7 +897,10 @@ fn font_choice_bytes(key: &str, list: &[FontChoice]) -> Option<Vec<u8>> {
         return Some(b.to_vec());
     }
     if let Some(path) = key.strip_prefix("sys:") {
-        return std::fs::read(path).ok();
+        // Validate what we read — a persisted pick may have been a
+        // bitmap-only font that the scan now filters out.
+        let bytes = std::fs::read(path).ok()?;
+        return ttf_meta(&bytes).map(|_| bytes);
     }
     let choice = list.iter().find(|c| c.key == key)?;
     let path = installed_font_file(choice)?;
@@ -787,6 +974,7 @@ fn ttf_meta(data: &[u8]) -> Option<(String, String, bool)> {
     }
     let num = u16::from_be_bytes(data[4..6].try_into().ok()?) as usize;
     let (mut name, mut post) = (None, None);
+    let mut outlines = false;
     for i in 0..num {
         let rec = 12 + i * 16;
         if data.len() < rec + 16 {
@@ -797,9 +985,16 @@ fn ttf_meta(data: &[u8]) -> Option<(String, String, bool)> {
         match &data[rec..rec + 4] {
             b"name" => name = Some((off, len)),
             b"post" => post = Some((off, len)),
-            b"fvar" => return None,
+            b"fvar" => return None, // variable font — rasterizer risk
+            b"glyf" | b"CFF " | b"CFF2" => outlines = true,
             _ => {}
         }
+    }
+    // Bitmap-only fonts (CBDT/EBDT/sbix strikes, e.g. color emoji or
+    // old .otb fonts) parse as sfnt but rasterize nothing — text would
+    // go invisible if selected. Require at least one outline table.
+    if !outlines {
+        return None;
     }
     let (off, len) = name?;
     let table = data.get(off..off + len)?;
@@ -1007,8 +1202,12 @@ mod tests {
             ("jetbrains-nerd", true),
             ("meslo-nerd", true),
             ("jetbrains", true),
+            ("space-mono", true),
+            ("ubuntu-mono", true),
+            ("courier-prime", true),
             ("fira-sans", false),
             ("ubuntu", false),
+            ("lato", false),
         ] {
             let bytes = bundled_bytes(key).expect("bundled");
             let (family, _sub, is_mono) =
