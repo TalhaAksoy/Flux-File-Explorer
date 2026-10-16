@@ -301,7 +301,9 @@ pub fn file_table(app: &mut FluxApp, ui: &mut egui::Ui) -> RowAction {
             if resp.drag_started() {
                 action.drag_start = Some(row_idx);
             }
-            if drag_active && kind == EntryKind::Dir && resp.hovered() {
+            // `contains_pointer`: `hovered` is only the dragged widget while
+            // a button is down — drop zones need the positional test.
+            if drag_active && kind == EntryKind::Dir && resp.contains_pointer() {
                 action.drop_row = Some(row_idx);
                 // Bright accent glow marking the drop target row.
                 crate::glyphs::glow_drop_target(
