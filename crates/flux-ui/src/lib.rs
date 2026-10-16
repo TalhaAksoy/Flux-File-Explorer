@@ -205,11 +205,15 @@ impl FluxApp {
         }
         if copy {
             let items = self.actionable_paths();
+            flux_platform::clipboard::write_files(&items, false);
+            self.ext_clipboard = None;
             self.clipboard.items = items;
             self.clipboard.cut = false;
         }
         if cut {
             let items = self.actionable_paths();
+            flux_platform::clipboard::write_files(&items, true);
+            self.ext_clipboard = None;
             self.clipboard.items = items;
             self.clipboard.cut = true;
         }
@@ -615,12 +619,21 @@ impl eframe::App for FluxApp {
                         let s = tab.snap.read().unwrap();
                         tab.sel.select_row(&s, row);
                     }
+                    // Snapshot the OS clipboard once per menu open — the
+                    // menu renders every frame and a live read would spawn
+                    // a subprocess per frame on Linux.
+                    self.ext_clipboard = flux_platform::clipboard::read_files();
                     self.context_menu_pos = Some(pos);
                 }
                 row_action = row_act;
                 Some(had_row_ctx)
             }
         });
+        // Steer the deferred-metadata engine toward the viewport: the
+        // entry-index range rendered this frame is statted first.
+        if let Some((lo, hi)) = row_action.visible_range {
+            self.meta_engine.set_priority(lo, hi.saturating_add(1));
+        }
 
         // Right-click on empty table space → background menu for the
         // current directory (Explorer's background menu equivalent).
@@ -633,6 +646,7 @@ impl eframe::App for FluxApp {
                 .pointer_interact_pos()
                 .is_some_and(|p| central_rect.contains(p))
         {
+            self.ext_clipboard = flux_platform::clipboard::read_files();
             self.bg_menu_pos = ctx.pointer_interact_pos();
         }
 

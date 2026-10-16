@@ -644,7 +644,7 @@ pub fn row_context_menu(app: &mut FluxApp, ui: &mut egui::Ui, items: &[PathBuf])
     let single = items.len() == 1;
     let first = items.first().cloned();
     let single_dir = single && first.as_ref().is_some_and(|p| p.is_dir());
-    let clipboard_ready = !app.clipboard.items.is_empty();
+    let clipboard_ready = !app.clipboard.items.is_empty() || app.ext_clipboard.is_some();
     if m::item(ui, "Open").clicked() {
         ui.close();
         if let Some(p) = first.clone() {
@@ -675,11 +675,15 @@ pub fn row_context_menu(app: &mut FluxApp, ui: &mut egui::Ui, items: &[PathBuf])
     m::sep(ui);
     if m::item_shortcut(ui, "Cut", &format!("{CMD}+X")).clicked() {
         ui.close();
+        flux_platform::clipboard::write_files(items, true);
+        app.ext_clipboard = None;
         app.clipboard.items = items.to_vec();
         app.clipboard.cut = true;
     }
     if m::item_shortcut(ui, "Copy", &format!("{CMD}+C")).clicked() {
         ui.close();
+        flux_platform::clipboard::write_files(items, false);
+        app.ext_clipboard = None;
         app.clipboard.items = items.to_vec();
         app.clipboard.cut = false;
     }
@@ -800,7 +804,7 @@ pub fn bg_context_menu(app: &mut FluxApp, ui: &mut egui::Ui) {
             input: String::new(),
         };
     }
-    let has_clip = !app.clipboard.items.is_empty();
+    let has_clip = !app.clipboard.items.is_empty() || app.ext_clipboard.is_some();
     if m::item_sc_enabled(ui, "Paste", &format!("{CMD}+V"), has_clip).clicked() {
         ui.close();
         let dest = app.current_path();

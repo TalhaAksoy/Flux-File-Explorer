@@ -1,5 +1,6 @@
 //! flux-platform: platform adapters. All OS-conditional code lives here.
 
+pub mod clipboard;
 pub mod icons;
 pub mod open;
 pub mod sysdirs;

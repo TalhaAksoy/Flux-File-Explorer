@@ -19,5 +19,20 @@ tracing.workspace = true
 [target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
 file_icon_provider = "1.0.2"
 
+# NSPasteboard file-URL interop for the OS clipboard (macOS).
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = "0.3"
+objc2-app-kit = "0.3"
+
+# CF_HDROP + Preferred DropEffect clipboard interop (Windows).
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.60", features = [
+    "Win32_Foundation",
+    "Win32_System_DataExchange",
+    "Win32_System_Memory",
+    "Win32_UI_Shell",
+] }
+
 [lints]
 workspace = true
