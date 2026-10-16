@@ -252,7 +252,9 @@ pub fn toolbar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
 
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if glyphs::icon_button(ui, glyphs::Glyph::Gear, "Settings", true).clicked() {
-                app.dialog = crate::app::Dialog::Settings;
+                app.dialog = crate::app::Dialog::Settings {
+                    orig: Box::new(app.settings.clone()),
+                };
             }
             ui.add_space(4.0);
             // Search mode toggle + filter/search box.

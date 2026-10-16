@@ -330,7 +330,27 @@ pub fn show(app: &mut FluxApp, ctx: &egui::Context) {
                     }
                 });
         }
-        Dialog::Settings => {
+        Dialog::Settings { orig } => {
+            // Undo live-applied previews (fonts/zoom/theme) — called on
+            // Cancel/Escape; "Done" keeps app.settings and persists.
+            let revert = |app: &mut FluxApp, ctx: &egui::Context| {
+                let dark = match orig.theme {
+                    flux_settings::Theme::System => {
+                        ctx.system_theme().is_some_and(|t| t == egui::Theme::Dark)
+                    }
+                    flux_settings::Theme::Dark => true,
+                    flux_settings::Theme::Light => false,
+                };
+                app.settings = (**orig).clone();
+                app.dark = dark;
+                ctx.set_fonts(crate::theme::load_fonts(&orig.ui_font, &orig.mono_font));
+                ctx.set_zoom_factor(orig.ui_scale);
+                crate::theme::apply_theme(ctx, dark);
+            };
+            if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+                revert(app, ctx);
+                close = true;
+            }
             card("Settings")
                 .default_width(430.0)
                 .max_height(560.0)
@@ -474,16 +494,18 @@ pub fn show(app: &mut FluxApp, ctx: &egui::Context) {
                                             .color(pal.text_muted)
                                             .size(12.0),
                                         );
-                                        if ui
-                                            .add(
-                                                egui::Slider::new(
-                                                    &mut app.settings.ui_scale,
-                                                    0.85..=1.3,
-                                                )
-                                                .show_value(false),
+                                        // Zoom applies on release, not
+                                        // mid-drag — a live zoom resizes
+                                        // this very dialog under the
+                                        // pointer and the drag jitters.
+                                        let r = ui.add(
+                                            egui::Slider::new(
+                                                &mut app.settings.ui_scale,
+                                                0.85..=1.3,
                                             )
-                                            .changed()
-                                        {
+                                            .show_value(false),
+                                        );
+                                        if r.drag_stopped() || (r.changed() && !r.dragged()) {
                                             ctx.set_zoom_factor(app.settings.ui_scale);
                                         }
                                     },
@@ -614,8 +636,11 @@ pub fn show(app: &mut FluxApp, ctx: &egui::Context) {
                     // Footer stays pinned — outside the scroll area so it
                     // never scrolls/clips off at small window heights.
                     let (done, cancel) = footer(ui, "Done", true);
-                    if done || cancel {
+                    if done {
                         app.save_settings();
+                        close = true;
+                    } else if cancel {
+                        revert(app, ctx);
                         close = true;
                     }
                 });

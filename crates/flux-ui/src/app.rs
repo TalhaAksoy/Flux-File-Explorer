@@ -55,7 +55,11 @@ pub enum Dialog {
         /// thread on slow/network filesystems.
         meta: Option<crate::dialogs::PropsMeta>,
     },
-    Settings,
+    /// Snapshot of `app.settings` taken when the dialog opened — Cancel /
+    /// Escape restores it so nothing persists without "Done".
+    Settings {
+        orig: Box<flux_settings::Settings>,
+    },
     About,
 }
 
