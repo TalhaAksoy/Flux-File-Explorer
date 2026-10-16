@@ -50,19 +50,49 @@ pub enum Dialog {
         query: ConflictQuery,
         apply_all: bool,
     },
-    BulkRename(BulkRenameState),
     Properties {
         path: PathBuf,
         /// Filled by a background stat so the dialog never blocks the UI
         /// thread on slow/network filesystems.
         meta: Option<crate::dialogs::PropsMeta>,
     },
-    /// Snapshot of `app.settings` taken when the dialog opened — Cancel /
-    /// Escape restores it so nothing persists without "Done".
-    Settings {
-        orig: Box<flux_settings::Settings>,
-    },
-    About,
+}
+
+/// Top-level workspace shown in the main content region. `Explorer` is the
+/// file browser; `Settings`/`BulkRename` are full pages that replace the
+/// browser panes while open (tab bar + status bar stay — they're global).
+/// Explorer state (tabs, selections, scroll) is untouched while a page is
+/// up; closing a page restores it exactly.
+#[derive(Default)]
+pub enum Screen {
+    #[default]
+    Explorer,
+    Settings(SettingsUi),
+    // Boxed: the planner state is ~250 bytes; keeping it off the enum
+    // keeps `Screen` (and `FluxApp`) small in the common Explorer case.
+    BulkRename(Box<BulkRenameState>),
+}
+
+/// Settings-page state: which category is focused and the search query
+/// that filters the registry (empty query = normal category view).
+#[derive(Default)]
+pub struct SettingsUi {
+    pub category: crate::settings_page::Category,
+    pub query: String,
+    /// Two-step confirmation for "Reset all settings".
+    pub reset_armed: bool,
+}
+
+/// Which rows the rename preview list shows. Display-only — operation
+/// order/semantics come from `plan`, never from the filtered view.
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+pub enum RenameFilter {
+    #[default]
+    All,
+    Changed,
+    Unchanged,
+    /// Conflicts, duplicate targets, invalid names.
+    Issues,
 }
 
 pub struct BulkRenameState {
@@ -79,9 +109,22 @@ pub struct BulkRenameState {
     pub set_ext: Option<String>,
     pub template: String,
     pub plan: Vec<flux_operations::RenameAction>,
+    /// A plan recompute is in flight on the worker; results are dropped
+    /// unless their generation still matches `plan_gen` (stale-guard).
+    pub plan_rx: Option<(
+        u64,
+        std::sync::mpsc::Receiver<Vec<flux_operations::RenameAction>>,
+    )>,
+    pub plan_gen: u64,
+    /// True while the worker is crunching — the list shows the last plan
+    /// dimmed so typing never blocks.
+    pub plan_stale: bool,
     pub dirty: bool,
     /// Last keystroke time for debounce.
     pub last_edit: Instant,
+    /// Preview list state — filter + filename search.
+    pub filter: RenameFilter,
+    pub query: String,
 }
 
 impl BulkRenameState {
@@ -100,8 +143,65 @@ impl BulkRenameState {
             set_ext: None,
             template: String::new(),
             plan: Vec::new(),
+            plan_rx: None,
+            plan_gen: 0,
+            plan_stale: false,
             dirty: true,
             last_edit: Instant::now(),
+            filter: RenameFilter::All,
+            query: String::new(),
+        }
+    }
+
+    /// Mark the plan dirty — the workspace's debounce submits a recompute.
+    pub fn mark_dirty(&mut self) {
+        self.dirty = true;
+        self.last_edit = Instant::now();
+    }
+
+    /// Kick the rename plan onto a worker thread. plan_renames is pure
+    /// (name transforms + `exists()` checks), but with 10k+ sources the
+    /// stat storm can stall a frame — off the UI thread it never does.
+    /// Generations discard results superseded by a newer edit.
+    pub fn recompute_async(&mut self) {
+        self.dirty = false;
+        self.plan_stale = true;
+        self.plan_gen += 1;
+        let generation = self.plan_gen;
+        let sources = self.sources.clone();
+        let rules = self.rules();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::Builder::new()
+            .name("flux-rename-plan".into())
+            .spawn(move || {
+                let _ = tx.send(flux_operations::plan_renames(&sources, &rules));
+            })
+            .expect("spawn rename planner");
+        self.plan_rx = Some((generation, rx));
+    }
+
+    /// Accept a finished plan only if it answers the latest request.
+    /// Returns true when a pending computation resolved (applied or dropped).
+    pub fn poll_plan(&mut self) -> bool {
+        let Some((generation, rx)) = &self.plan_rx else {
+            return false;
+        };
+        let generation = *generation;
+        match rx.try_recv() {
+            Ok(plan) => {
+                self.plan_rx = None;
+                if generation == self.plan_gen {
+                    self.plan = plan;
+                    self.plan_stale = false;
+                }
+                true
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.plan_rx = None;
+                self.plan_stale = false;
+                true
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => false,
         }
     }
 
@@ -240,6 +340,10 @@ pub const COMMANDS: &[Command] = &[
         name: "Toggle Dark/Light",
         id: "toggle_theme",
     },
+    Command {
+        name: "Open Settings",
+        id: "open_settings",
+    },
 ];
 
 pub struct FluxApp {
@@ -258,6 +362,9 @@ pub struct FluxApp {
 
     pub clipboard: Clipboard,
     pub dialog: Dialog,
+    /// What fills the main content region — the file explorer, the
+    /// Settings page, or the Bulk Rename workspace.
+    pub screen: Screen,
     pub address_edit: Option<String>,
     pub focus_address: bool,
     pub focus_filter: bool,
@@ -339,6 +446,51 @@ pub struct FluxApp {
     pub journaled_ops: rustc_hash::FxHashSet<u64>,
     /// Ops-history popup visibility (status-bar button).
     pub show_ops_log: bool,
+    /// Screenshot harness config — `Some` only when FLUX_SHOT_OUT is set.
+    /// Dev/QA only: renders N frames, captures, exits.
+    pub shot: Option<ShotCfg>,
+}
+
+/// Env-driven screenshot capture for visual QA. `FLUX_SHOT_OUT` enables
+/// it; `FLUX_SHOT_SCREEN` = explorer|settings|rename, `FLUX_SHOT_DIR`
+/// opens that folder, `FLUX_SHOT_THEME` = dark|light, `FLUX_SHOT_SIZE` =
+/// WxH (parsed in `run`), `FLUX_SHOT_WAIT` = settle frames (default 45).
+pub struct ShotCfg {
+    pub out: PathBuf,
+    pub screen: String,
+    pub wait: u32,
+    pub frames: u32,
+    pub requested: bool,
+    pub screen_done: bool,
+    /// Re-requested at runtime — some Wayland compositors ignore the
+    /// initial `with_inner_size` but honor post-map resizes.
+    pub size: Option<[f32; 2]>,
+}
+
+impl ShotCfg {
+    pub fn from_env() -> Option<Self> {
+        let out = std::env::var_os("FLUX_SHOT_OUT").map(PathBuf::from)?;
+        Some(Self {
+            out,
+            screen: std::env::var("FLUX_SHOT_SCREEN").unwrap_or_else(|_| "explorer".into()),
+            wait: std::env::var("FLUX_SHOT_WAIT")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(45),
+            frames: 0,
+            requested: false,
+            screen_done: false,
+            size: shot_size_env(),
+        })
+    }
+}
+
+/// Parse `FLUX_SHOT_SIZE` (`WxH`) — shared by `run()` and the harness.
+pub fn shot_size_env() -> Option<[f32; 2]> {
+    std::env::var("FLUX_SHOT_SIZE").ok().and_then(|s| {
+        let (w, h) = s.split_once('x')?;
+        Some([w.parse::<f32>().ok()?, h.parse::<f32>().ok()?])
+    })
 }
 
 /// A journal entry: submit `inverse` to undo, `forward` to redo.
@@ -408,6 +560,24 @@ fn undo_entry(kind: &OpKind, label: &str) -> Option<UndoEntry> {
 }
 
 impl FluxApp {
+    /// Open the Settings page over the current explorer state.
+    pub fn open_settings(&mut self) {
+        self.screen = Screen::Settings(SettingsUi::default());
+    }
+
+    /// Open the Bulk Rename workspace for the given sources.
+    pub fn open_bulk_rename(&mut self, sources: Vec<PathBuf>) {
+        let mut st = BulkRenameState::new(sources);
+        st.recompute_async();
+        self.screen = Screen::BulkRename(Box::new(st));
+    }
+
+    /// Leave a page back to the explorer. Explorer state was never
+    /// touched, so this is instant — no rescan.
+    pub fn close_screen(&mut self) {
+        self.screen = Screen::Explorer;
+    }
+
     /// Cached `open_with_apps` for `path` (see field docs).
     pub fn open_with_apps(&mut self, path: &Path) -> Vec<flux_platform::OpenWithApp> {
         if self.open_with_cache.as_ref().map(|(p, _)| p.as_path()) != Some(path) {
@@ -497,6 +667,7 @@ impl FluxApp {
             active: 0,
             clipboard: Clipboard::default(),
             dialog: Dialog::None,
+            screen: Screen::Explorer,
             address_edit: None,
             focus_address: false,
             focus_filter: false,
@@ -536,6 +707,7 @@ impl FluxApp {
             redo_stack: Vec::new(),
             journaled_ops: rustc_hash::FxHashSet::default(),
             show_ops_log: false,
+            shot: ShotCfg::from_env(),
         }
     }
 
@@ -1369,13 +1541,22 @@ impl FluxApp {
         if got_hits {
             ctx.request_repaint();
         }
-        // Deferred bulk-rename preview recompute (debounced).
-        if let Dialog::BulkRename(br) = &mut self.dialog
-            && br.dirty
-            && br.last_edit.elapsed() > Duration::from_millis(250)
-        {
-            br.recompute();
-            ctx.request_repaint();
+        // Bulk Rename preview: debounced recompute on the worker thread,
+        // stale-generation results dropped.
+        if let Screen::BulkRename(br) = &mut self.screen {
+            if br.dirty
+                && br.plan_rx.is_none()
+                && br.last_edit.elapsed() > Duration::from_millis(220)
+            {
+                br.recompute_async();
+            }
+            if br.poll_plan() {
+                ctx.request_repaint();
+            } else if br.plan_stale {
+                // Repaint again soon so the stale-plan state can't linger
+                // if the worker finishes between event-driven frames.
+                ctx.request_repaint_after(Duration::from_millis(50));
+            }
         }
         // GC finished ops once a minute.
         if self.last_gc.elapsed() > Duration::from_secs(60) {
@@ -1440,9 +1621,10 @@ impl FluxApp {
             "bulk_rename" => {
                 let paths = self.actionable_paths();
                 if !paths.is_empty() {
-                    self.dialog = Dialog::BulkRename(BulkRenameState::new(paths));
+                    self.open_bulk_rename(paths);
                 }
             }
+            "open_settings" => self.open_settings(),
             "copy_paths" => {
                 let text = self
                     .actionable_paths()

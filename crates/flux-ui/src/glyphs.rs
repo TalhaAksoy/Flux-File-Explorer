@@ -25,6 +25,34 @@ pub enum Glyph {
     Preview,
     /// Clock face — operation history.
     History,
+    /// Sun/disc — appearance & theme settings.
+    Sun,
+    /// "Aa" text — typography settings.
+    TypeAa,
+    /// Folder silhouette — file/folder settings + menu icons.
+    Folder,
+    /// Four cells — view-mode/grid settings.
+    GridView,
+    /// Keyboard outline — shortcut list.
+    Keyboard,
+    /// Three fader lines — advanced settings.
+    Sliders,
+    /// Circled i — about/properties.
+    Info,
+    /// Scissors — cut.
+    Cut,
+    /// Two overlapping sheets — copy.
+    Copy,
+    /// Clipboard — paste.
+    Paste,
+    /// Pencil — rename/edit.
+    Pencil,
+    /// Trash can — destructive delete.
+    Trash,
+    /// Archive box — compress.
+    Archive,
+    /// Linked chain — copy path / link.
+    Link,
 }
 
 /// Draw `g` centered inside `rect` with the given color.
@@ -173,6 +201,213 @@ pub fn paint_glyph(p: &egui::Painter, rect: Rect, g: Glyph, color: Color32) {
             p.circle_stroke(c, r * 0.78, st);
             p.line_segment([c, c + egui::vec2(0.0, -r * 0.5)], st);
             p.line_segment([c, c + egui::vec2(r * 0.38, r * 0.22)], st);
+        }
+        Glyph::Sun => {
+            p.circle_stroke(c, r * 0.42, st);
+            for i in 0..8 {
+                let a = i as f32 * std::f32::consts::TAU / 8.0;
+                let d = egui::vec2(a.cos(), a.sin());
+                p.line_segment([c + d * (r * 0.62), c + d * (r * 0.82)], st);
+            }
+        }
+        Glyph::TypeAa => {
+            // Painted "Aa" — the one glyph that's intentionally text.
+            p.text(
+                c + egui::vec2(-r * 0.1, 0.0),
+                egui::Align2::CENTER_CENTER,
+                "Aa",
+                egui::FontId::proportional(r * 1.15),
+                color,
+            );
+        }
+        Glyph::Folder => {
+            let (w, h) = (rect.width(), rect.height());
+            let dark = color;
+            let tab = Rect::from_min_size(rect.min, Vec2::new(w * 0.44, h * 0.34));
+            p.rect_filled(tab, 1.5, dark);
+            let back = Rect::from_min_max(
+                Pos2::new(rect.left() + w * 0.4, rect.top() + h * 0.12),
+                Pos2::new(rect.right(), rect.top() + h * 0.42),
+            );
+            p.rect_filled(back, 1.5, dark);
+            let body = Rect::from_min_max(Pos2::new(rect.left(), rect.top() + h * 0.32), rect.max);
+            p.rect_filled(body, 2.0, dark.gamma_multiply(0.75));
+        }
+        Glyph::GridView => {
+            let cell = r * 0.62;
+            for dy in [-1.0f32, 1.0] {
+                for dx in [-1.0f32, 1.0] {
+                    let cr = Rect::from_center_size(
+                        c + egui::vec2(dx * (cell * 0.62), dy * (cell * 0.62)),
+                        Vec2::splat(cell),
+                    );
+                    p.rect_stroke(cr, CornerRadius::same(1), st, StrokeKind::Inside);
+                }
+            }
+        }
+        Glyph::Keyboard => {
+            let body = Rect::from_center_size(c, Vec2::new(r * 1.6, r * 1.05));
+            p.rect_stroke(body, CornerRadius::same(2), st, StrokeKind::Inside);
+            // Spacebar + a few key dots.
+            p.line_segment(
+                [
+                    Pos2::new(body.left() + r * 0.3, body.bottom() - r * 0.24),
+                    Pos2::new(body.right() - r * 0.3, body.bottom() - r * 0.24),
+                ],
+                st,
+            );
+            for i in -1..=1 {
+                p.circle_filled(
+                    Pos2::new(c.x + i as f32 * r * 0.45, body.top() + r * 0.32),
+                    w * 0.6,
+                    color,
+                );
+            }
+        }
+        Glyph::Sliders => {
+            for (i, knob) in [-0.3f32, 0.25, -0.05].iter().enumerate() {
+                let y = c.y + (i as f32 - 1.0) * r * 0.5;
+                p.line_segment(
+                    [Pos2::new(c.x - r * 0.72, y), Pos2::new(c.x + r * 0.72, y)],
+                    st,
+                );
+                p.circle_filled(Pos2::new(c.x + knob * r * 1.4, y), w * 1.1, color);
+            }
+        }
+        Glyph::Info => {
+            p.circle_stroke(c, r * 0.75, st);
+            p.circle_filled(Pos2::new(c.x, c.y - r * 0.36), w * 0.9, color);
+            p.line_segment(
+                [
+                    Pos2::new(c.x, c.y - r * 0.05),
+                    Pos2::new(c.x, c.y + r * 0.45),
+                ],
+                st,
+            );
+        }
+        Glyph::Cut => {
+            // Scissors: two finger rings + open blades crossing at center.
+            p.circle_stroke(c + egui::vec2(-r * 0.42, r * 0.45), r * 0.24, st);
+            p.circle_stroke(c + egui::vec2(r * 0.42, r * 0.45), r * 0.24, st);
+            p.line_segment(
+                [
+                    c + egui::vec2(-r * 0.3, r * 0.3),
+                    c + egui::vec2(r * 0.55, -r * 0.55),
+                ],
+                st,
+            );
+            p.line_segment(
+                [
+                    c + egui::vec2(r * 0.3, r * 0.3),
+                    c + egui::vec2(-r * 0.55, -r * 0.55),
+                ],
+                st,
+            );
+        }
+        Glyph::Copy => {
+            // Two overlapping sheets — back sheet top-right, front bottom-left.
+            let back =
+                Rect::from_center_size(c + egui::vec2(r * 0.22, -r * 0.22), Vec2::splat(r * 0.95));
+            p.rect_stroke(back, CornerRadius::same(2), st, StrokeKind::Inside);
+            let front =
+                Rect::from_center_size(c + egui::vec2(-r * 0.22, r * 0.22), Vec2::splat(r * 0.95));
+            p.rect_stroke(front, CornerRadius::same(2), st, StrokeKind::Inside);
+        }
+        Glyph::Paste => {
+            let body = Rect::from_center_size(c, Vec2::new(r * 1.15, r * 1.4));
+            p.rect_stroke(body, CornerRadius::same(2), st, StrokeKind::Inside);
+            let clip =
+                Rect::from_center_size(Pos2::new(c.x, body.top()), Vec2::new(r * 0.55, r * 0.28));
+            p.rect_filled(clip, 1.0, color);
+            for i in 0..2 {
+                let y = body.top() + r * (0.55 + i as f32 * 0.4);
+                p.line_segment(
+                    [
+                        Pos2::new(body.left() + r * 0.22, y),
+                        Pos2::new(body.right() - r * 0.22, y),
+                    ],
+                    st,
+                );
+            }
+        }
+        Glyph::Pencil => {
+            // Diagonal pencil: body line + sharpened tip.
+            let a = c + egui::vec2(-r * 0.55, r * 0.55);
+            let b = c + egui::vec2(r * 0.35, -r * 0.35);
+            p.line_segment([a, b], Stroke::new(w * 1.6, color));
+            let tip = c + egui::vec2(r * 0.62, -r * 0.62);
+            p.line_segment([b, tip], st);
+            p.add(egui::Shape::convex_polygon(
+                vec![
+                    b + egui::vec2(-r * 0.08, r * 0.28),
+                    b + egui::vec2(r * 0.28, -r * 0.08),
+                    tip,
+                ],
+                color,
+                Stroke::NONE,
+            ));
+        }
+        Glyph::Trash => {
+            let body = Rect::from_min_max(
+                Pos2::new(c.x - r * 0.5, c.y - r * 0.38),
+                Pos2::new(c.x + r * 0.5, c.y + r * 0.68),
+            );
+            p.rect_stroke(body, CornerRadius::same(2), st, StrokeKind::Inside);
+            // Lid + handle.
+            p.line_segment(
+                [
+                    Pos2::new(c.x - r * 0.65, c.y - r * 0.45),
+                    Pos2::new(c.x + r * 0.65, c.y - r * 0.45),
+                ],
+                st,
+            );
+            p.line_segment(
+                [
+                    Pos2::new(c.x - r * 0.2, c.y - r * 0.62),
+                    Pos2::new(c.x + r * 0.2, c.y - r * 0.62),
+                ],
+                st,
+            );
+            for dx in [-0.2f32, 0.2] {
+                p.line_segment(
+                    [
+                        Pos2::new(c.x + dx * r, c.y - r * 0.15),
+                        Pos2::new(c.x + dx * r, c.y + r * 0.5),
+                    ],
+                    Stroke::new(w * 0.8, color),
+                );
+            }
+        }
+        Glyph::Archive => {
+            let body = Rect::from_center_size(c, Vec2::new(r * 1.45, r * 1.15));
+            p.rect_stroke(body, CornerRadius::same(2), st, StrokeKind::Inside);
+            // Lid seam + handle slot.
+            p.line_segment(
+                [
+                    Pos2::new(body.left(), body.top() + r * 0.32),
+                    Pos2::new(body.right(), body.top() + r * 0.32),
+                ],
+                st,
+            );
+            p.line_segment(
+                [
+                    Pos2::new(c.x - r * 0.2, body.top() + r * 0.6),
+                    Pos2::new(c.x + r * 0.2, body.top() + r * 0.6),
+                ],
+                Stroke::new(w * 1.1, color),
+            );
+        }
+        Glyph::Link => {
+            // Chain link: two rings on a diagonal, joined by the middle bar.
+            p.circle_stroke(c + egui::vec2(-r * 0.34, r * 0.34), r * 0.34, st);
+            p.circle_stroke(c + egui::vec2(r * 0.34, -r * 0.34), r * 0.34, st);
+            p.line_segment(
+                [
+                    c + egui::vec2(-r * 0.1, r * 0.1),
+                    c + egui::vec2(r * 0.1, -r * 0.1),
+                ],
+                st,
+            );
         }
     }
 }

@@ -156,16 +156,47 @@ pub fn file_table(app: &mut FluxApp, ui: &mut egui::Ui) -> RowAction {
     if let Some(msg) = &state_label
         && (!loading || view_len == 0)
     {
-        ui.add_space(50.0);
-        ui.vertical_centered(|ui| {
-            if loading {
-                ui.add(egui::Spinner::new());
+        let failed = msg.starts_with("Cannot read");
+        if loading {
+            ui.add_space(60.0);
+            ui.vertical_centered(|ui| {
+                ui.add(egui::Spinner::new().size(26.0));
+                ui.add_space(8.0);
+                ui.label(egui::RichText::new(msg).weak());
+            });
+        } else {
+            crate::widgets::empty_state(
+                ui,
+                &pal,
+                |p, r, c| {
+                    crate::glyphs::paint_glyph(
+                        p,
+                        r,
+                        if failed {
+                            crate::glyphs::Glyph::Info
+                        } else {
+                            crate::glyphs::Glyph::Folder
+                        },
+                        c,
+                    )
+                },
+                msg,
+                if failed {
+                    Some("Check the path and permissions.")
+                } else if msg.starts_with("No items") {
+                    Some("Clear the filter to see everything.")
+                } else {
+                    None
+                },
+            );
+            if failed {
+                ui.vertical_centered(|ui| {
+                    if crate::widgets::secondary_button(ui, "Retry").clicked() {
+                        action.retry = true;
+                    }
+                });
             }
-            ui.label(egui::RichText::new(msg).weak());
-            if msg.starts_with("Cannot read") && ui.button("Retry").clicked() {
-                action.retry = true;
-            }
-        });
+        }
         return action;
     }
 

@@ -148,7 +148,7 @@ pub fn toolbar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
         if let Some(text) = &mut app.address_edit {
             let id = egui::Id::new("address_bar");
             let resp = ui.add_sized(
-                [ui.available_width() - 320.0, 26.0],
+                [(ui.available_width() - 320.0).max(80.0), 26.0],
                 egui::TextEdit::singleline(text)
                     .margin(egui::Margin::symmetric(10, 4))
                     .id(id),
@@ -179,7 +179,7 @@ pub fn toolbar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
             crumb_plate.show(ui, |ui| {
                 egui::ScrollArea::horizontal()
                     .id_salt("crumbs")
-                    .max_width(ui.available_width() - 320.0)
+                    .max_width((ui.available_width() - 320.0).max(60.0))
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
                             ui.spacing_mut().item_spacing.x = 2.0;
@@ -252,9 +252,7 @@ pub fn toolbar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
 
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if glyphs::icon_button(ui, glyphs::Glyph::Gear, "Settings", true).clicked() {
-                app.dialog = crate::app::Dialog::Settings {
-                    orig: Box::new(app.settings.clone()),
-                };
+                app.open_settings();
             }
             ui.add_space(4.0);
             // Search mode toggle + filter/search box.
@@ -318,11 +316,13 @@ pub fn sidebar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
             for (i, (label, path)) in places.into_iter().enumerate() {
                 let resp = glyphs::icon_row(ui, folder_icon, label, path == current);
                 resp.context_menu(|ui| {
-                    if ui.button("Open").clicked() {
+                    crate::menu::begin(ui, 180.0);
+                    if crate::menu::item_icon(ui, glyphs::Glyph::External, "Open").clicked() {
                         act.navigate = Some(path.clone());
                         ui.close();
                     }
-                    if ui.button("Open in New Tab").clicked() {
+                    if crate::menu::item_icon(ui, glyphs::Glyph::Plus, "Open in New Tab").clicked()
+                    {
                         act.new_tab_at = Some(path.clone());
                         ui.close();
                     }
@@ -373,7 +373,8 @@ pub fn sidebar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
                 egui::Sense::click(),
             );
             hdr.context_menu(|ui| {
-                if ui.button("Add Folder…").clicked() {
+                crate::menu::begin(ui, 180.0);
+                if crate::menu::item_icon(ui, glyphs::Glyph::Plus, "Add Folder…").clicked() {
                     add_bookmark = true;
                     ui.close();
                 }
@@ -418,7 +419,8 @@ pub fn sidebar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
                     pal.text_muted,
                 );
                 resp.context_menu(|ui| {
-                    if ui.button("Add Folder…").clicked() {
+                    crate::menu::begin(ui, 180.0);
+                    if crate::menu::item_icon(ui, glyphs::Glyph::Plus, "Add Folder…").clicked() {
                         add_bookmark = true;
                         ui.close();
                     }
@@ -444,16 +446,19 @@ pub fn sidebar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
                     let resp = glyphs::icon_row(ui, folder_icon, &label, p == current)
                         .on_hover_text(p.display().to_string());
                     resp.context_menu(|ui| {
-                        if ui.button("Open").clicked() {
+                        crate::menu::begin(ui, 180.0);
+                        if crate::menu::item_icon(ui, glyphs::Glyph::External, "Open").clicked() {
                             act.navigate = Some(p.clone());
                             ui.close();
                         }
-                        if ui.button("Open in New Tab").clicked() {
+                        if crate::menu::item_icon(ui, glyphs::Glyph::Plus, "Open in New Tab")
+                            .clicked()
+                        {
                             act.new_tab_at = Some(p.clone());
                             ui.close();
                         }
-                        ui.separator();
-                        if ui.button("Remove from Sidebar").clicked() {
+                        crate::menu::sep(ui);
+                        if crate::menu::item_danger(ui, "Remove from Sidebar", "").clicked() {
                             unpin = Some(p.clone());
                             ui.close();
                         }
@@ -499,7 +504,8 @@ pub fn sidebar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
                 let resp = glyphs::icon_row(ui, plus, "Add Bookmark…", false)
                     .on_hover_text("Choose a folder, or drop folders here");
                 resp.context_menu(|ui| {
-                    if ui.button("Add Folder…").clicked() {
+                    crate::menu::begin(ui, 180.0);
+                    if crate::menu::item_icon(ui, glyphs::Glyph::Plus, "Add Folder…").clicked() {
                         add_bookmark = true;
                         ui.close();
                     }
@@ -657,12 +663,13 @@ pub fn tab_bar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
                 act.activate_tab = Some(i);
             }
             resp.context_menu(|ui| {
-                if ui.button("Close").clicked() {
-                    close_idx = Some(i);
+                crate::menu::begin(ui, 180.0);
+                if crate::menu::item_icon(ui, glyphs::Glyph::Copy, "Duplicate Tab").clicked() {
+                    act.new_tab = true;
                     ui.close();
                 }
-                if ui.button("Duplicate Tab").clicked() {
-                    act.new_tab = true;
+                if crate::menu::item_icon(ui, glyphs::Glyph::Close, "Close").clicked() {
+                    close_idx = Some(i);
                     ui.close();
                 }
             });
@@ -805,7 +812,11 @@ pub fn status_bar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) 
                     if let Some(bps) = p.throughput_bps() {
                         text.push_str(&format!(" · {}/s", format_size(bps as u64)));
                     }
-                    ui.label(egui::RichText::new(text).small());
+                    ui.label(
+                        egui::RichText::new(text)
+                            .color(pal.text_secondary)
+                            .size(11.5),
+                    );
                 });
             }
         });

@@ -179,10 +179,13 @@ pub fn panel(app: &mut FluxApp, ui: &mut egui::Ui) {
     let pal = Palette::of(&ui.style().visuals);
     let target = app.focused_path();
     let Some(path) = target else {
-        ui.add_space(30.0);
-        ui.vertical_centered(|ui| {
-            ui.label(egui::RichText::new("Nothing selected").color(pal.text_muted));
-        });
+        crate::widgets::empty_state(
+            ui,
+            &pal,
+            |p, r, c| crate::glyphs::paint_glyph(p, r, crate::glyphs::Glyph::Preview, c),
+            "Nothing selected",
+            Some("Select a file to preview it"),
+        );
         return;
     };
 
@@ -206,6 +209,76 @@ pub fn panel(app: &mut FluxApp, ui: &mut egui::Ui) {
             .size(14.0)
             .strong(),
     );
+    ui.add_space(8.0);
+
+    // Preview leads (Finder Quick Look order); metadata sits below it.
+    match app.preview.as_ref().map(|m| &m.preview) {
+        None => {
+            ui.vertical_centered(|ui| {
+                ui.add(egui::Spinner::new().size(16.0));
+            });
+            ui.add_space(12.0);
+        }
+        Some(Preview::Empty) => {
+            ui.label(
+                egui::RichText::new("No preview available")
+                    .color(pal.text_muted)
+                    .size(12.0),
+            );
+            ui.add_space(12.0);
+        }
+        Some(Preview::Info(msg)) => {
+            egui::Frame::default()
+                .fill(pal.field_inset)
+                .corner_radius(egui::CornerRadius::same(8))
+                .inner_margin(egui::Margin::symmetric(12, 9))
+                .show(ui, |ui| {
+                    ui.label(
+                        egui::RichText::new(msg)
+                            .color(pal.text_secondary)
+                            .size(12.0),
+                    );
+                });
+            ui.add_space(12.0);
+        }
+        Some(Preview::Text(text)) => {
+            let h = (ui.available_height() - 120.0).max(140.0);
+            egui::Frame::default()
+                .fill(pal.field_inset)
+                .corner_radius(egui::CornerRadius::same(8))
+                .inner_margin(egui::Margin::symmetric(10, 8))
+                .show(ui, |ui| {
+                    ui.set_max_height(h);
+                    egui::ScrollArea::vertical()
+                        .id_salt("preview_text")
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            ui.add(
+                                egui::Label::new(
+                                    egui::RichText::new(text)
+                                        .monospace()
+                                        .size(11.0)
+                                        .color(pal.text_secondary),
+                                )
+                                .selectable(true)
+                                .wrap(),
+                            );
+                        });
+                });
+            ui.add_space(12.0);
+        }
+        Some(Preview::Image(_)) => {
+            if let Some(tex) = &app.preview_tex {
+                let size = tex.size_vec2();
+                let w = ui.available_width().max(1.0);
+                let scaled = size * (w / size.x).min(1.0);
+                ui.vertical_centered(|ui| {
+                    ui.add(egui::Image::from_texture(tex).max_size(scaled));
+                });
+            }
+            ui.add_space(12.0);
+        }
+    }
 
     // Metadata rows — read live (cheap single stat).
     if let Ok(md) = std::fs::symlink_metadata(&path) {
@@ -223,7 +296,6 @@ pub fn panel(app: &mut FluxApp, ui: &mut egui::Ui) {
         if let Ok(m) = md.modified() {
             rows.push(("Modified", crate::format::format_mtime(Some(m))));
         }
-        ui.add_space(6.0);
         for (k, v) in rows {
             ui.horizontal(|ui| {
                 ui.label(egui::RichText::new(k).color(pal.text_muted).size(11.5));
@@ -231,57 +303,7 @@ pub fn panel(app: &mut FluxApp, ui: &mut egui::Ui) {
                     ui.label(egui::RichText::new(v).color(pal.text_secondary).size(11.5));
                 });
             });
-        }
-    }
-    ui.add_space(6.0);
-    ui.separator();
-    ui.add_space(6.0);
-
-    match app.preview.as_ref().map(|m| &m.preview) {
-        None => {
-            ui.vertical_centered(|ui| {
-                ui.add(egui::Spinner::new().size(16.0));
-            });
-        }
-        Some(Preview::Empty) => {
-            ui.label(
-                egui::RichText::new("No preview available")
-                    .color(pal.text_muted)
-                    .size(12.0),
-            );
-        }
-        Some(Preview::Info(msg)) => {
-            ui.label(
-                egui::RichText::new(msg)
-                    .color(pal.text_secondary)
-                    .size(12.0),
-            );
-        }
-        Some(Preview::Text(text)) => {
-            egui::ScrollArea::vertical()
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    ui.add(
-                        egui::Label::new(
-                            egui::RichText::new(text)
-                                .monospace()
-                                .size(11.0)
-                                .color(pal.text_secondary),
-                        )
-                        .selectable(true)
-                        .wrap(),
-                    );
-                });
-        }
-        Some(Preview::Image(_)) => {
-            if let Some(tex) = &app.preview_tex {
-                let size = tex.size_vec2();
-                let w = ui.available_width().max(1.0);
-                let scaled = size * (w / size.x).min(1.0);
-                ui.vertical_centered(|ui| {
-                    ui.add(egui::Image::from_texture(tex).max_size(scaled));
-                });
-            }
+            ui.add_space(2.0);
         }
     }
 }

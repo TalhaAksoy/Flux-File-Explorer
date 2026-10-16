@@ -31,25 +31,54 @@ pub fn begin(ui: &mut Ui, width: f32) {
 
 /// Full-width flat menu item — rounded hover highlight, left-aligned label.
 pub fn item(ui: &mut Ui, label: &str) -> Response {
-    item_full(ui, label, None, true)
+    item_full(ui, label, None, true, None, false)
+}
+
+/// Item with a small painted glyph in the icon column.
+pub fn item_icon(ui: &mut Ui, icon: crate::glyphs::Glyph, label: &str) -> Response {
+    item_full(ui, label, None, true, Some(icon), false)
+}
+
+/// Icon item with a right-aligned shortcut hint.
+pub fn item_icon_sc(ui: &mut Ui, icon: crate::glyphs::Glyph, label: &str, sc: &str) -> Response {
+    item_full(ui, label, Some(sc), true, Some(icon), false)
+}
+
+/// Destructive item — danger-colored label + icon.
+pub fn item_danger(ui: &mut Ui, label: &str, sc: &str) -> Response {
+    item_full(
+        ui,
+        label,
+        Some(sc).filter(|s| !s.is_empty()),
+        true,
+        Some(crate::glyphs::Glyph::Trash),
+        true,
+    )
 }
 
 /// Full-width item with a right-aligned shortcut hint (e.g. "Cmd+C").
 pub fn item_shortcut(ui: &mut Ui, label: &str, shortcut: &str) -> Response {
-    item_full(ui, label, Some(shortcut), true)
+    item_full(ui, label, Some(shortcut), true, None, false)
 }
 
 /// Item that greys out when `enabled` is false (e.g. Paste w/ empty clip).
 pub fn item_enabled(ui: &mut Ui, label: &str, enabled: bool) -> Response {
-    item_full(ui, label, None, enabled)
+    item_full(ui, label, None, enabled, None, false)
 }
 
 /// Shortcut item that greys out when `enabled` is false.
 pub fn item_sc_enabled(ui: &mut Ui, label: &str, shortcut: &str, enabled: bool) -> Response {
-    item_full(ui, label, Some(shortcut), enabled)
+    item_full(ui, label, Some(shortcut), enabled, None, false)
 }
 
-fn item_full(ui: &mut Ui, label: &str, sc: Option<&str>, enabled: bool) -> Response {
+fn item_full(
+    ui: &mut Ui,
+    label: &str,
+    sc: Option<&str>,
+    enabled: bool,
+    icon: Option<crate::glyphs::Glyph>,
+    danger: bool,
+) -> Response {
     let w = ui.available_width();
     // Left offset reserves a checkmark/icon column.
     let mut b = Button::new(RichText::new(""))
@@ -60,23 +89,43 @@ fn item_full(ui: &mut Ui, label: &str, sc: Option<&str>, enabled: bool) -> Respo
     }
     let r = ui.add_enabled(enabled, b);
     let label_x = r.rect.left() + 26.0;
+    let pal = crate::theme::Palette::of(&ui.style().visuals);
+    let fg = if !enabled {
+        ui.visuals().weak_text_color()
+    } else if danger {
+        pal.danger
+    } else {
+        ui.visuals().text_color()
+    };
+    if let Some(g) = icon {
+        let ir = egui::Rect::from_center_size(
+            egui::pos2(r.rect.left() + 13.0, r.rect.center().y),
+            Vec2::splat(14.0),
+        );
+        crate::glyphs::paint_glyph(
+            ui.painter(),
+            ir,
+            g,
+            if enabled {
+                fg
+            } else {
+                ui.visuals().weak_text_color()
+            },
+        );
+    }
     ui.painter().text(
         egui::pos2(label_x, r.rect.center().y),
         egui::Align2::LEFT_CENTER,
         label,
         egui::FontId::proportional(13.5),
-        if enabled {
-            ui.visuals().text_color()
-        } else {
-            ui.visuals().weak_text_color()
-        },
+        fg,
     );
     r
 }
 
 /// Item with a painted checkmark when `checked` — no font dependency.
 pub fn item_check(ui: &mut Ui, label: &str, checked: bool) -> Response {
-    let r = item_full(ui, label, None, true);
+    let r = item_full(ui, label, None, true, None, false);
     if checked {
         let accent = ui.visuals().selection.stroke.color;
         let center = egui::pos2(r.rect.left() + 13.0, r.rect.center().y);
@@ -94,14 +143,15 @@ pub fn item_check(ui: &mut Ui, label: &str, checked: bool) -> Response {
 }
 
 /// A nested submenu with a full-width trigger and a painted "›" arrow.
+/// The label is painted at the same x as item labels so the leading
+/// icon column lines up across rows.
 pub fn submenu<R>(ui: &mut Ui, label: &str, add_contents: impl FnOnce(&mut Ui) -> R) {
     let w = ui.available_width();
-    // Leading spaces align the trigger label with the items' check column.
-    let btn = Button::new(RichText::new(format!("    {label}")))
+    let btn = Button::new(RichText::new(""))
         .min_size(Vec2::new(w, 30.0))
         .frame_when_inactive(false)
-        .right_text("›");
-    let (_r, inner) = SubMenuButton::from_button(btn).ui(ui, |sub| {
+        .right_text(RichText::new("›").weak());
+    let (r, inner) = SubMenuButton::from_button(btn).ui(ui, |sub| {
         menu::menu_style(sub.style_mut());
         {
             let st = sub.style_mut();
@@ -112,6 +162,13 @@ pub fn submenu<R>(ui: &mut Ui, label: &str, add_contents: impl FnOnce(&mut Ui) -
         sub.set_max_width(210.0);
         add_contents(sub)
     });
+    ui.painter().text(
+        egui::pos2(r.rect.left() + 26.0, r.rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        label,
+        egui::FontId::proportional(13.5),
+        ui.visuals().text_color(),
+    );
     let _ = inner;
 }
 

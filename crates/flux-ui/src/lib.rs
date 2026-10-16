@@ -14,10 +14,13 @@ pub mod icon_cache;
 pub mod menu;
 pub mod pane;
 pub mod preview;
+pub mod rename_page;
+pub mod settings_page;
 pub mod terminal;
 pub mod theme;
 pub mod thumbs;
 pub mod view;
+pub mod widgets;
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -65,6 +68,11 @@ impl FluxApp {
                 self.address_edit = None;
             } else if !matches!(self.dialog, Dialog::None) {
                 self.dialog = Dialog::None;
+            } else if !matches!(self.screen, app::Screen::Explorer) {
+                // Full pages sit above the browser but below overlays —
+                // Esc leaves the page, flushing pending settings writes.
+                self.save_settings();
+                self.close_screen();
             } else if self.dragging.is_some() {
                 self.dragging = None;
             } else if self.sidebar_drag.is_some() {
@@ -77,8 +85,11 @@ impl FluxApp {
             }
             return;
         }
-        if self.palette_open || !matches!(self.dialog, Dialog::None) {
-            return; // dialogs own the keyboard
+        if self.palette_open
+            || !matches!(self.dialog, Dialog::None)
+            || !matches!(self.screen, app::Screen::Explorer)
+        {
+            return; // dialogs and pages own the keyboard
         }
         if ctx.egui_wants_keyboard_input() {
             return; // a text field is focused
@@ -290,7 +301,7 @@ impl FluxApp {
                     };
                 }
                 _ => {
-                    self.dialog = Dialog::BulkRename(app::BulkRenameState::new(items));
+                    self.open_bulk_rename(items);
                 }
             }
         }
@@ -421,11 +432,16 @@ impl FluxApp {
                             }
                         }
                         resp.context_menu(|ui| {
-                            if ui.button("Copy path").clicked() {
+                            crate::menu::begin(ui, 180.0);
+                            if crate::menu::item_icon(ui, crate::glyphs::Glyph::Link, "Copy Path")
+                                .clicked()
+                            {
                                 ui.close();
                                 self.pending_copy_text = Some(h.path.display().to_string());
                             }
-                            if ui.button("Reveal").clicked() {
+                            if crate::menu::item_icon(ui, crate::glyphs::Glyph::Folder, "Reveal")
+                                .clicked()
+                            {
                                 ui.close();
                                 let _ = flux_platform::reveal_path(&h.path);
                             }
@@ -514,6 +530,20 @@ impl FluxApp {
                 {
                     run = Some(c.id);
                 }
+                if matches.is_empty() {
+                    ui.add_space(4.0);
+                    ui.label(
+                        egui::RichText::new("No matching commands")
+                            .color(pal.text_muted)
+                            .size(12.0),
+                    );
+                }
+                ui.add_space(4.0);
+                ui.label(
+                    egui::RichText::new("↑↓ navigate  ·  ↵ run  ·  esc close")
+                        .color(pal.text_muted)
+                        .size(10.5),
+                );
             });
         if let Some(id) = run {
             self.run_command(id, ctx);
@@ -628,8 +658,9 @@ impl eframe::App for FluxApp {
                 });
         }
         // Right-side preview pane (Alt+P) — after the side/bottom panels
-        // so it shares the central column's full height.
-        if self.settings.show_preview {
+        // so it shares the central column's full height. Suppressed while
+        // a full page is open — it's dead space beside a workspace.
+        if self.settings.show_preview && matches!(self.screen, app::Screen::Explorer) {
             let prev_frame = egui::Frame::default()
                 .fill(theme::chrome_fill(dark))
                 .inner_margin(egui::Margin::symmetric(12, 10));
@@ -645,7 +676,13 @@ impl eframe::App for FluxApp {
         }
         let mut row_action = view::RowAction::default();
         let central = egui::CentralPanel::default().show(ui, |ui| {
-            if self.search_ui.active {
+            if matches!(self.screen, app::Screen::Settings(_)) {
+                settings_page::page(self, ui);
+                None
+            } else if matches!(self.screen, app::Screen::BulkRename(_)) {
+                rename_page::page(self, ui);
+                None
+            } else if self.search_ui.active {
                 self.search_view(ui);
                 None
             } else {
@@ -1031,6 +1068,78 @@ impl eframe::App for FluxApp {
         if loading || !self.ops.active_ops().is_empty() || self.search_ui.active {
             ctx.request_repaint_after(Duration::from_millis(100));
         }
+
+        // ── Screenshot harness (dev/QA only, off unless FLUX_SHOT_OUT) ──
+        if self.shot.is_some() {
+            // Switch to the target screen once the directory has loaded.
+            if self.shot.as_ref().is_some_and(|s| !s.screen_done) {
+                let which = self.shot.as_ref().unwrap().screen.clone();
+                let ok = match which.as_str() {
+                    "settings" => {
+                        self.open_settings();
+                        true
+                    }
+                    "rename" => {
+                        let paths: Vec<PathBuf> = {
+                            let s = self.current_tab().snap.read().unwrap();
+                            (0..s.view_len().min(60))
+                                .filter_map(|i| s.row(i).map(|(_, e)| s.path.join(&e.name)))
+                                .collect()
+                        };
+                        if paths.is_empty() {
+                            false
+                        } else {
+                            self.open_bulk_rename(paths);
+                            true
+                        }
+                    }
+                    _ => true,
+                };
+                if ok && let Some(sc) = &mut self.shot {
+                    sc.screen_done = true;
+                }
+            }
+            if let Some(sc) = &mut self.shot
+                && sc.screen_done
+            {
+                if let Some(size) = sc.size
+                    && sc.frames < 10
+                {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::Vec2::from(size)));
+                }
+                sc.frames += 1;
+                if sc.frames >= sc.wait && !sc.requested {
+                    sc.requested = true;
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(
+                        egui::UserData::default(),
+                    ));
+                }
+            }
+            // Keep frames flowing while waiting for the target screen /
+            // the screenshot reply; also during capture so events arrive.
+            ctx.request_repaint();
+            let mut shot_img: Option<std::sync::Arc<egui::ColorImage>> = None;
+            ctx.input(|i| {
+                for ev in &i.events {
+                    if let egui::Event::Screenshot { image, .. } = ev {
+                        shot_img = Some(image.clone());
+                    }
+                }
+            });
+            if let Some(img) = shot_img
+                && let Some(sc) = self.shot.take()
+            {
+                let (w, h) = (img.width() as u32, img.height() as u32);
+                let buf: Vec<u8> = img.pixels.iter().flat_map(|p| p.to_array()).collect();
+                if let Some(rgba) = image::RgbaImage::from_raw(w, h, buf)
+                    && let Err(e) = rgba.save(&sc.out)
+                {
+                    eprintln!("flux: screenshot save failed: {e}");
+                }
+                eprintln!("flux: screenshot → {}", sc.out.display());
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+        }
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
@@ -1042,10 +1151,11 @@ impl eframe::App for FluxApp {
 
 /// Launch the app. `start_dir` overrides the restored session path.
 pub fn run(start_dir: Option<PathBuf>) -> eframe::Result<()> {
+    let shot_size = app::shot_size_env();
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("Flux Files")
-            .with_inner_size([1060.0, 680.0])
+            .with_inner_size(shot_size.unwrap_or([1060.0, 680.0]))
             .with_min_inner_size([560.0, 360.0]),
         renderer: eframe::Renderer::Glow,
         ..Default::default()
@@ -1057,8 +1167,21 @@ pub fn run(start_dir: Option<PathBuf>) -> eframe::Result<()> {
             let mut app = FluxApp::new();
             app.icons.set_ctx(cc.egui_ctx.clone());
             app.thumbs.set_ctx(cc.egui_ctx.clone());
-            if let Some(d) = start_dir.filter(|d| d.is_dir()) {
+            if let Some(d) = start_dir
+                .or_else(|| std::env::var_os("FLUX_SHOT_DIR").map(PathBuf::from))
+                .filter(|d| d.is_dir())
+            {
                 app.navigate(d);
+            }
+            // Screenshot QA overrides — theme/size are env-driven so a
+            // script can capture every combination without a config file.
+            if let Ok(t) = std::env::var("FLUX_SHOT_THEME") {
+                app.settings.theme = if t == "light" {
+                    flux_settings::Theme::Light
+                } else {
+                    flux_settings::Theme::Dark
+                };
+                app.dark = t != "light";
             }
             cc.egui_ctx.set_fonts(theme::load_fonts(
                 &app.settings.ui_font,

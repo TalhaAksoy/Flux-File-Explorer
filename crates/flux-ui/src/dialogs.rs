@@ -3,51 +3,47 @@
 
 use std::path::PathBuf;
 
+use flux_operations::OpKind;
 use flux_operations::conflict::{ConflictAction, ConflictDecision};
-use flux_operations::{OpKind, RenameRule, RenameStatus};
 
-use crate::app::{BulkRenameState, Dialog, FluxApp};
+use crate::app::{Dialog, FluxApp};
 use crate::format::format_size;
 
 /// Modern card-style window: no title bar (the heading lives inside),
 /// rounded corners + soft shadow come from the theme's window visuals.
-fn card(title: &'static str) -> egui::Window<'static> {
+fn card(ctx: &egui::Context, title: &'static str) -> egui::Window<'static> {
     egui::Window::new(title)
         .title_bar(false)
         .collapsible(false)
         .resizable(false)
         .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        .frame(
+            egui::Frame::window(&ctx.style_of(ctx.theme()))
+                .inner_margin(egui::Margin::symmetric(20, 16)),
+        )
 }
 
 fn heading(ui: &mut egui::Ui, title: &str) {
-    ui.label(egui::RichText::new(title).size(16.0).strong());
-}
-
-/// Muted uppercase section divider used by the Settings dialog.
-fn section(ui: &mut egui::Ui, pal: &crate::theme::Palette, title: &str) {
-    ui.add_space(4.0);
-    ui.label(
-        egui::RichText::new(title)
-            .color(pal.text_muted)
-            .size(10.5)
-            .strong(),
-    );
+    ui.label(egui::RichText::new(title).size(17.0).strong());
     ui.add_space(2.0);
 }
 
 /// Right-aligned [primary][Cancel] footer. Returns (primary, cancel).
 fn footer(ui: &mut egui::Ui, primary: &str, primary_enabled: bool) -> (bool, bool) {
     let mut clicked = (false, false);
-    ui.add_space(4.0);
+    ui.add_space(8.0);
     ui.horizontal(|ui| {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if primary_enabled {
-                clicked.0 = crate::menu::primary_button(ui, primary).clicked();
+                clicked.0 = crate::widgets::primary_button(ui, primary).clicked();
             } else {
-                ui.add_enabled(false, egui::Button::new(primary));
+                ui.add_enabled(
+                    false,
+                    egui::Button::new(primary).min_size(egui::vec2(88.0, 30.0)),
+                );
             }
             ui.add_space(4.0);
-            clicked.1 = crate::menu::ghost_button(ui, "Cancel").clicked();
+            clicked.1 = crate::widgets::ghost_button(ui, "Cancel").clicked();
         });
     });
     clicked
@@ -58,6 +54,28 @@ pub fn show(app: &mut FluxApp, ctx: &egui::Context) {
     ops_log_window(app, ctx);
     // Take the dialog out so dialog bodies can call back into `app` freely.
     let mut dialog = std::mem::replace(&mut app.dialog, Dialog::None);
+    // Modal scrim: dims the app behind the card and swallows stray clicks
+    // so dialogs behave modally without blocking window input handling.
+    if !matches!(dialog, Dialog::None) {
+        let dark = ctx.theme() == egui::Theme::Dark;
+        let r = ctx.content_rect();
+        egui::Area::new(egui::Id::new("dialog_scrim"))
+            .order(egui::Order::Middle)
+            .fixed_pos(r.min)
+            .interactable(true)
+            .show(ctx, |ui| {
+                ui.set_clip_rect(r);
+                // Clicking the scrim does not dismiss — dialogs carry
+                // their own explicit Cancel; a missed click mustn't
+                // discard a half-typed name.
+                let _ = ui.interact(r, egui::Id::new("scrim_hit"), egui::Sense::click());
+                ui.painter().rect_filled(
+                    r,
+                    0,
+                    egui::Color32::from_black_alpha(if dark { 110 } else { 60 }),
+                );
+            });
+    }
     let cur_dir = app.current_path();
     let mut close = false;
     match &mut dialog {
@@ -65,7 +83,7 @@ pub fn show(app: &mut FluxApp, ctx: &egui::Context) {
         Dialog::Rename { src, input } => {
             let src_c = src.clone();
             let mut do_rename = false;
-            card("Rename").default_width(360.0).show(ctx, |ui| {
+            card(ctx, "Rename").default_width(360.0).show(ctx, |ui| {
                 heading(ui, "Rename");
                 ui.label(
                     egui::RichText::new(src_c.display().to_string())
@@ -106,28 +124,30 @@ pub fn show(app: &mut FluxApp, ctx: &egui::Context) {
         }
         Dialog::NewFolder { input } => {
             let mut ok = false;
-            card("New Folder").default_width(360.0).show(ctx, |ui| {
-                heading(ui, "New Folder");
-                ui.label(
-                    egui::RichText::new(format!("in {}", cur_dir.display()))
-                        .weak()
-                        .small(),
-                );
-                ui.add_space(8.0);
-                let r = ui.add(
-                    egui::TextEdit::singleline(input)
-                        .desired_width(320.0)
-                        .margin(egui::Margin::symmetric(12, 9))
-                        .hint_text("Folder name"),
-                );
-                r.request_focus();
-                let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                let (primary, cancel) = footer(ui, "Create", !input.trim().is_empty());
-                ok = primary || enter;
-                if cancel {
-                    close = true;
-                }
-            });
+            card(ctx, "New Folder")
+                .default_width(360.0)
+                .show(ctx, |ui| {
+                    heading(ui, "New Folder");
+                    ui.label(
+                        egui::RichText::new(format!("in {}", cur_dir.display()))
+                            .weak()
+                            .small(),
+                    );
+                    ui.add_space(8.0);
+                    let r = ui.add(
+                        egui::TextEdit::singleline(input)
+                            .desired_width(320.0)
+                            .margin(egui::Margin::symmetric(12, 9))
+                            .hint_text("Folder name"),
+                    );
+                    r.request_focus();
+                    let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    let (primary, cancel) = footer(ui, "Create", !input.trim().is_empty());
+                    ok = primary || enter;
+                    if cancel {
+                        close = true;
+                    }
+                });
             if ok {
                 app.ops.submit(
                     OpKind::Mkdir {
@@ -140,7 +160,7 @@ pub fn show(app: &mut FluxApp, ctx: &egui::Context) {
         }
         Dialog::NewFile { input } => {
             let mut ok = false;
-            card("New File").default_width(360.0).show(ctx, |ui| {
+            card(ctx, "New File").default_width(360.0).show(ctx, |ui| {
                 heading(ui, "New File");
                 ui.label(
                     egui::RichText::new(format!("in {}", cur_dir.display()))
@@ -175,34 +195,37 @@ pub fn show(app: &mut FluxApp, ctx: &egui::Context) {
         Dialog::ConfirmPermanentDelete { items } => {
             let n = items.len();
             let mut confirm = false;
-            card("Delete Permanently")
-                .default_width(380.0)
+            card(ctx, "Delete Permanently")
+                .default_width(400.0)
                 .show(ctx, |ui| {
                     heading(ui, "Delete Permanently?");
-                    ui.add_space(4.0);
                     ui.label(format!(
-                        "Permanently delete {n} item(s)? This cannot be undone."
+                        "{n} item{} will be permanently deleted. This cannot be undone.",
+                        if n == 1 { "" } else { "s" }
                     ));
+                    if n <= 8 {
+                        ui.add_space(6.0);
+                        for p in items.iter() {
+                            ui.label(
+                                egui::RichText::new(format!(
+                                    "  {}",
+                                    p.file_name()
+                                        .map(|f| f.to_string_lossy().into_owned())
+                                        .unwrap_or_else(|| p.display().to_string())
+                                ))
+                                .weak()
+                                .small(),
+                            );
+                        }
+                    }
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui
-                                .add(
-                                    egui::Button::new(
-                                        egui::RichText::new("Delete")
-                                            .color(egui::Color32::WHITE)
-                                            .size(14.0),
-                                    )
-                                    .fill(ui.visuals().error_fg_color)
-                                    .corner_radius(egui::CornerRadius::same(7))
-                                    .min_size(egui::vec2(88.0, 32.0)),
-                                )
-                                .clicked()
-                            {
+                            if crate::widgets::danger_button(ui, "Delete").clicked() {
                                 confirm = true;
                             }
                             ui.add_space(4.0);
-                            if crate::menu::ghost_button(ui, "Cancel").clicked() {
+                            if crate::widgets::secondary_button(ui, "Cancel").clicked() {
                                 close = true;
                             }
                         });
@@ -220,34 +243,22 @@ pub fn show(app: &mut FluxApp, ctx: &egui::Context) {
         Dialog::ConfirmTrashUnsupported { items } => {
             let n = items.len();
             let mut yes = false;
-            card("Trash unavailable")
-                .default_width(380.0)
+            card(ctx, "Trash Unavailable")
+                .default_width(400.0)
                 .show(ctx, |ui| {
                     heading(ui, "Trash Unavailable");
-                    ui.add_space(4.0);
                     ui.label(format!(
-                        "Trash is unavailable for {n} item(s). Permanently delete them instead?"
+                        "Trash is unavailable for {n} item{}. Permanently delete them instead?",
+                        if n == 1 { "" } else { "s" }
                     ));
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui
-                                .add(
-                                    egui::Button::new(
-                                        egui::RichText::new("Delete permanently")
-                                            .color(egui::Color32::WHITE)
-                                            .size(14.0),
-                                    )
-                                    .fill(ui.visuals().error_fg_color)
-                                    .corner_radius(egui::CornerRadius::same(7))
-                                    .min_size(egui::vec2(88.0, 32.0)),
-                                )
-                                .clicked()
-                            {
+                            if crate::widgets::danger_button(ui, "Delete Permanently").clicked() {
                                 yes = true;
                             }
                             ui.add_space(4.0);
-                            if crate::menu::ghost_button(ui, "Cancel").clicked() {
+                            if crate::widgets::secondary_button(ui, "Cancel").clicked() {
                                 close = true;
                             }
                         });
@@ -271,32 +282,57 @@ pub fn show(app: &mut FluxApp, ctx: &egui::Context) {
             if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
                 decision = Some(ConflictAction::CancelOp);
             }
-            card("Item already exists")
-                .default_width(420.0)
+            card(ctx, "Item Already Exists")
+                .default_width(440.0)
                 .show(ctx, |ui| {
-                    heading(ui, "Item Already Exists");
-                    ui.add_space(4.0);
-                    ui.label(egui::RichText::new(dst.display().to_string()).strong());
-                    ui.label(
-                        egui::RichText::new(format!("From: {}", src.display()))
-                            .small()
-                            .weak(),
-                    );
-                    ui.add_space(4.0);
+                    let pal = crate::theme::Palette::of(&ui.style().visuals);
+                    heading(ui, "An item with this name already exists");
+                    // The destination in a quiet card — what the user is
+                    // deciding about; the source path stays muted.
+                    egui::Frame::default()
+                        .fill(pal.field_inset)
+                        .corner_radius(egui::CornerRadius::same(8))
+                        .inner_margin(egui::Margin::symmetric(12, 9))
+                        .show(ui, |ui| {
+                            ui.label(
+                                egui::RichText::new(
+                                    dst.file_name()
+                                        .map(|f| f.to_string_lossy().into_owned())
+                                        .unwrap_or_else(|| dst.display().to_string()),
+                                )
+                                .strong()
+                                .size(14.0),
+                            );
+                            ui.label(
+                                egui::RichText::new(
+                                    dst.parent()
+                                        .map(|p| p.display().to_string())
+                                        .unwrap_or_default(),
+                                )
+                                .weak()
+                                .small(),
+                            );
+                            ui.label(
+                                egui::RichText::new(format!("Incoming: {}", src.display()))
+                                    .weak()
+                                    .small(),
+                            );
+                        });
+                    ui.add_space(6.0);
                     ui.checkbox(apply_all, "Apply to all remaining conflicts");
-                    ui.add_space(4.0);
+                    ui.add_space(6.0);
                     ui.horizontal(|ui| {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if crate::menu::primary_button(ui, "Replace").clicked() {
+                            if crate::widgets::primary_button(ui, "Replace").clicked() {
                                 decision = Some(ConflictAction::Overwrite);
                             }
-                            if crate::menu::ghost_button(ui, "Keep Both").clicked() {
+                            if crate::widgets::secondary_button(ui, "Keep Both").clicked() {
                                 decision = Some(ConflictAction::KeepBoth);
                             }
-                            if crate::menu::ghost_button(ui, "Skip").clicked() {
+                            if crate::widgets::ghost_button(ui, "Skip").clicked() {
                                 decision = Some(ConflictAction::Skip);
                             }
-                            if crate::menu::ghost_button(ui, "Cancel").clicked() {
+                            if crate::widgets::ghost_button(ui, "Cancel").clicked() {
                                 decision = Some(ConflictAction::CancelOp);
                             }
                         });
@@ -313,497 +349,15 @@ pub fn show(app: &mut FluxApp, ctx: &egui::Context) {
                 close = true;
             }
         }
-        Dialog::BulkRename(br) => {
-            bulk_rename_dialog(app, br, ctx, &mut close);
-        }
         Dialog::Properties { path, meta } => {
             let p = path.clone();
-            card("Properties")
+            card(ctx, "Properties")
                 .resizable(true)
                 .min_size([340.0, 0.0])
                 .show(ctx, |ui| {
                     heading(ui, "Properties");
                     ui.add_space(6.0);
                     properties_body(ui, &p, meta, ctx);
-                    let (_p, cancel) = footer(ui, "Close", true);
-                    if _p || cancel {
-                        close = true;
-                    }
-                });
-        }
-        Dialog::Settings { orig } => {
-            // Undo live-applied previews (fonts/zoom/theme) — called on
-            // Cancel/Escape; "Done" keeps app.settings and persists.
-            let revert = |app: &mut FluxApp, ctx: &egui::Context| {
-                let dark = match orig.theme {
-                    flux_settings::Theme::System => {
-                        ctx.system_theme().is_some_and(|t| t == egui::Theme::Dark)
-                    }
-                    flux_settings::Theme::Dark => true,
-                    flux_settings::Theme::Light => false,
-                };
-                app.settings = (**orig).clone();
-                app.dark = dark;
-                ctx.set_fonts(crate::theme::load_fonts(&orig.ui_font, &orig.mono_font));
-                app.apply_ui_scale(ctx);
-                crate::theme::apply_theme(ctx, dark);
-                // Live-preferred view flags also revert.
-                app.set_show_system_files(orig.show_system_files);
-            };
-            if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-                revert(app, ctx);
-                close = true;
-            }
-            card("Settings")
-                .default_width(430.0)
-                .max_height(560.0)
-                .show(ctx, |ui| {
-                    egui::ScrollArea::vertical()
-                        .auto_shrink([false, false])
-                        .show(ui, |ui| {
-                            let pal = crate::theme::Palette::of(&ui.style().visuals);
-                            heading(ui, "Settings");
-                            ui.add_space(2.0);
-
-                            // —— Fonts ——
-                            section(ui, &pal, "FONTS");
-                            let mut fonts_changed = false;
-                            let mono_list = |l: &'static [crate::theme::FontChoice]| {
-                                std::ptr::eq(l, crate::theme::MONO_FONTS)
-                            };
-                            let font_row =
-                                |ui: &mut egui::Ui,
-                                 label: &str,
-                                 key: &mut String,
-                                 list: &'static [crate::theme::FontChoice],
-                                 changed: &mut bool| {
-                                    ui.horizontal(|ui| {
-                                        ui.label(
-                                            egui::RichText::new(label)
-                                                .color(pal.text_secondary)
-                                                .size(13.0),
-                                        );
-                                        ui.with_layout(
-                                            egui::Layout::right_to_left(egui::Align::Center),
-                                            |ui| {
-                                                let flags = crate::theme::installed_fonts(list);
-                                                let cur = if let Some(rest) =
-                                                    key.strip_prefix("sys:")
-                                                {
-                                                    crate::theme::system_fonts(mono_list(list))
-                                                        .iter()
-                                                        .find(|f| {
-                                                            f.path == std::path::Path::new(rest)
-                                                        })
-                                                        .map(|f| f.label.clone())
-                                                        .unwrap_or_else(|| {
-                                                            std::path::Path::new(rest)
-                                                                .file_stem()
-                                                                .map(|s| {
-                                                                    s.to_string_lossy().to_string()
-                                                                })
-                                                                .unwrap_or_else(|| "Custom".into())
-                                                        })
-                                                } else {
-                                                    list.iter()
-                                                        .position(|c| c.key == *key)
-                                                        .map(|i| {
-                                                            if flags[i].1 {
-                                                                list[i].label.to_string()
-                                                            } else {
-                                                                format!(
-                                                                    "{} (not installed)",
-                                                                    list[i].label
-                                                                )
-                                                            }
-                                                        })
-                                                        .unwrap_or_else(|| {
-                                                            list[0].label.to_string()
-                                                        })
-                                                };
-                                                egui::ComboBox::from_id_salt(label)
-                                                    .width(210.0)
-                                                    .selected_text(
-                                                        egui::RichText::new(cur).size(13.0),
-                                                    )
-                                                    .show_ui(ui, |ui| {
-                                                        let group =
-                                                            |ui: &mut egui::Ui, text: &str| {
-                                                                ui.add_space(4.0);
-                                                                ui.label(
-                                                                    egui::RichText::new(text)
-                                                                        .size(10.0)
-                                                                        .color(pal.text_muted),
-                                                                );
-                                                            };
-                                                        let mut pick = |ui: &mut egui::Ui,
-                                                                    k: String,
-                                                                    text: String,
-                                                                    family: Option<egui::FontFamily>,
-                                                                    enabled: bool| {
-                                                            let text = match family {
-                                                                Some(f) => egui::RichText::new(text)
-                                                                    .family(f),
-                                                                None => egui::RichText::new(text),
-                                                            };
-                                                            let resp = ui.add_enabled(
-                                                                enabled,
-                                                                egui::Button::selectable(
-                                                                    *key == k,
-                                                                    text,
-                                                                ),
-                                                            );
-                                                            if resp.clicked() {
-                                                                *key = k;
-                                                                *changed = true;
-                                                            }
-                                                        };
-                                                        // Default sentinel — always works.
-                                                        pick(
-                                                            ui,
-                                                            String::new(),
-                                                            list[0].label.to_string(),
-                                                            None,
-                                                            true,
-                                                        );
-                                                        group(ui, "FLUX FONTS");
-                                                        for (c, _) in
-                                                            crate::theme::installed_fonts(list)
-                                                                .iter()
-                                                                .filter(|(c, _)| {
-                                                                    crate::theme::is_bundled(c.key)
-                                                                })
-                                                        {
-                                                            // Bundled fonts preview in their own
-                                                            // typeface — each is registered under
-                                                            // its own egui family at load time.
-                                                            pick(
-                                                                ui,
-                                                                c.key.to_string(),
-                                                                c.label.to_string(),
-                                                                crate::theme::bundled_family(c.key),
-                                                                true,
-                                                            );
-                                                        }
-                                                        ui.separator();
-                                                        group(ui, "SYSTEM FONTS");
-                                                        // Curated picks that are actually on the
-                                                        // machine — "not installed" entries don't
-                                                        // belong under SYSTEM FONTS at all.
-                                                        for (c, _) in
-                                                            crate::theme::installed_fonts(list)
-                                                                .iter()
-                                                                .filter(|(c, installed)| {
-                                                                    !crate::theme::is_bundled(c.key)
-                                                                        && !c.patterns.is_empty()
-                                                                        && *installed
-                                                                })
-                                                        {
-                                                            pick(
-                                                                ui,
-                                                                c.key.to_string(),
-                                                                c.label.to_string(),
-                                                                None,
-                                                                true,
-                                                            );
-                                                        }
-                                                        // Every other family found on the OS —
-                                                        // dedupe against the curated labels above.
-                                                        let curated: Vec<String> = list
-                                                            .iter()
-                                                            .map(|c| {
-                                                                crate::theme::norm_label(c.label)
-                                                            })
-                                                            .collect();
-                                                        for f in crate::theme::system_fonts(
-                                                            mono_list(list),
-                                                        ) {
-                                                            if curated.contains(
-                                                                &crate::theme::norm_label(&f.label),
-                                                            ) {
-                                                                continue;
-                                                            }
-                                                            pick(
-                                                                ui,
-                                                                format!("sys:{}", f.path.display()),
-                                                                f.label.clone(),
-                                                                None,
-                                                                true,
-                                                            );
-                                                        }
-                                                    });
-                                            },
-                                        );
-                                    });
-                                };
-                            font_row(
-                                ui,
-                                "Interface font",
-                                &mut app.settings.ui_font,
-                                crate::theme::UI_FONTS,
-                                &mut fonts_changed,
-                            );
-                            font_row(
-                                ui,
-                                "Terminal font",
-                                &mut app.settings.mono_font,
-                                crate::theme::MONO_FONTS,
-                                &mut fonts_changed,
-                            );
-                            ui.horizontal(|ui| {
-                                ui.label(
-                                    egui::RichText::new("Terminal size")
-                                        .color(pal.text_secondary)
-                                        .size(13.0),
-                                );
-                                ui.with_layout(
-                                    egui::Layout::right_to_left(egui::Align::Center),
-                                    |ui| {
-                                        ui.add(
-                                            egui::DragValue::new(
-                                                &mut app.settings.terminal_font_size,
-                                            )
-                                            .range(9.0..=20.0)
-                                            .speed(0.1)
-                                            .suffix(" pt"),
-                                        );
-                                    },
-                                );
-                            });
-                            ui.horizontal(|ui| {
-                                ui.label(
-                                    egui::RichText::new("Interface scale")
-                                        .color(pal.text_secondary)
-                                        .size(13.0),
-                                );
-                                ui.with_layout(
-                                    egui::Layout::right_to_left(egui::Align::Center),
-                                    |ui| {
-                                        ui.label(
-                                            egui::RichText::new(format!(
-                                                "{:.0}%",
-                                                app.settings.ui_scale * 100.0
-                                            ))
-                                            .color(pal.text_muted)
-                                            .size(12.0),
-                                        );
-                                        // Zoom applies on release, not
-                                        // mid-drag — a live zoom resizes
-                                        // this very dialog under the
-                                        // pointer and the drag jitters.
-                                        let r = ui.add(
-                                            egui::Slider::new(
-                                                &mut app.settings.ui_scale,
-                                                0.85..=1.3,
-                                            )
-                                            .show_value(false),
-                                        );
-                                        if r.drag_stopped() || (r.changed() && !r.dragged()) {
-                                            app.apply_ui_scale(ctx);
-                                        }
-                                    },
-                                );
-                            });
-                            if fonts_changed {
-                                ctx.set_fonts(crate::theme::load_fonts(
-                                    &app.settings.ui_font,
-                                    &app.settings.mono_font,
-                                ));
-                            }
-
-                            // —— Typography preview ——
-                            ui.add_space(6.0);
-                            section(ui, &pal, "TYPOGRAPHY");
-                            let sample = |ui: &mut egui::Ui,
-                                          name: &str,
-                                          size: f32,
-                                          strong: bool,
-                                          mono: bool,
-                                          text: &str| {
-                                ui.horizontal(|ui| {
-                                    ui.add_sized(
-                                        [86.0, 20.0],
-                                        egui::Label::new(
-                                            egui::RichText::new(name)
-                                                .color(pal.text_muted)
-                                                .size(11.0),
-                                        ),
-                                    );
-                                    let font = if mono {
-                                        egui::FontId::monospace(size)
-                                    } else {
-                                        egui::FontId::proportional(size)
-                                    };
-                                    // Sample + size readout in one galley,
-                                    // truncated — wide fonts can't spill
-                                    // past the card edge.
-                                    let _ = strong; // egui has no real bold
-                                    let mut job = egui::text::LayoutJob::default();
-                                    job.append(
-                                        text,
-                                        0.0,
-                                        egui::TextFormat::simple(font, pal.text_primary),
-                                    );
-                                    job.append(
-                                        &format!("  {size}pt"),
-                                        0.0,
-                                        egui::TextFormat::simple(
-                                            egui::FontId::proportional(10.5),
-                                            pal.text_muted,
-                                        ),
-                                    );
-                                    ui.add(egui::Label::new(job).truncate());
-                                });
-                            };
-                            sample(ui, "Toolbar", 15.0, false, false, "Flux Files — Pictures");
-                            sample(
-                                ui,
-                                "Body",
-                                14.0,
-                                false,
-                                false,
-                                "Documents · Downloads · report.pdf",
-                            );
-                            sample(
-                                ui,
-                                "Selected",
-                                14.0,
-                                true,
-                                false,
-                                "Photos Library.photoslibrary",
-                            );
-                            sample(
-                                ui,
-                                "Metadata",
-                                12.0,
-                                false,
-                                false,
-                                "17 Sep 2026 · 21.1 MB · Zip",
-                            );
-                            sample(ui, "Status", 11.5, false, false, "3 items · 15.2 GB free");
-                            sample(
-                                ui,
-                                "Terminal",
-                                app.settings.terminal_font_size,
-                                false,
-                                true,
-                                "→ Pictures $ ls -l ~/Projects",
-                            );
-
-                            // —— Files ——
-                            ui.add_space(6.0);
-                            section(ui, &pal, "FILES");
-                            let sys_label = if cfg!(windows) {
-                                "Show protected operating system files"
-                            } else {
-                                "Show protected operating system files (Windows)"
-                            };
-                            if ui
-                                .checkbox(&mut app.settings.show_system_files, sys_label)
-                                .changed()
-                            {
-                                let v = app.settings.show_system_files;
-                                app.set_show_system_files(v);
-                            }
-                            ui.label(
-                                egui::RichText::new(
-                                    "Files Windows marks as both hidden and system — shown \
-                                     dimmed, not recommended for everyday browsing.",
-                                )
-                                .color(pal.text_muted)
-                                .size(11.0),
-                            );
-                            ui.add_space(4.0);
-                            ui.checkbox(&mut app.settings.show_preview, "Preview panel");
-                            ui.horizontal(|ui| {
-                                ui.label(
-                                    egui::RichText::new("Default view")
-                                        .color(pal.text_secondary)
-                                        .size(13.0),
-                                );
-                                ui.with_layout(
-                                    egui::Layout::right_to_left(egui::Align::Center),
-                                    |ui| {
-                                        for (label, mode) in [
-                                            ("Gallery", flux_settings::ViewMode::Gallery),
-                                            ("Grid", flux_settings::ViewMode::Grid),
-                                            ("Compact", flux_settings::ViewMode::Compact),
-                                            ("Details", flux_settings::ViewMode::List),
-                                        ] {
-                                            if ui
-                                                .selectable_label(
-                                                    app.settings.view_mode == mode,
-                                                    label,
-                                                )
-                                                .clicked()
-                                            {
-                                                app.settings.view_mode = mode;
-                                            }
-                                        }
-                                    },
-                                );
-                            });
-
-                            // —— Appearance ——
-                            ui.add_space(6.0);
-                            section(ui, &pal, "APPEARANCE");
-                            ui.horizontal(|ui| {
-                                ui.label(
-                                    egui::RichText::new("Theme")
-                                        .color(pal.text_secondary)
-                                        .size(13.0),
-                                );
-                                ui.with_layout(
-                                    egui::Layout::right_to_left(egui::Align::Center),
-                                    |ui| {
-                                        for (label, val) in [
-                                            ("System", flux_settings::Theme::System),
-                                            ("Light", flux_settings::Theme::Light),
-                                            ("Dark", flux_settings::Theme::Dark),
-                                        ] {
-                                            if ui
-                                                .selectable_label(app.settings.theme == val, label)
-                                                .clicked()
-                                            {
-                                                app.settings.theme = val;
-                                                app.dark = match val {
-                                                    flux_settings::Theme::System => ctx
-                                                        .system_theme()
-                                                        .is_some_and(|t| t == egui::Theme::Dark),
-                                                    flux_settings::Theme::Dark => true,
-                                                    flux_settings::Theme::Light => false,
-                                                };
-                                                crate::theme::apply_theme(ctx, app.dark);
-                                            }
-                                        }
-                                    },
-                                );
-                            });
-                        });
-                    // Footer stays pinned — outside the scroll area so it
-                    // never scrolls/clips off at small window heights.
-                    let (done, cancel) = footer(ui, "Done", true);
-                    if done {
-                        app.save_settings();
-                        close = true;
-                    } else if cancel {
-                        revert(app, ctx);
-                        close = true;
-                    }
-                });
-        }
-        Dialog::About => {
-            card("About Flux Files")
-                .default_width(300.0)
-                .show(ctx, |ui| {
-                    heading(ui, "Flux Files");
-                    ui.label(
-                        egui::RichText::new("A fast native file explorer")
-                            .weak()
-                            .small(),
-                    );
-                    ui.add_space(4.0);
-                    ui.weak("Built with Rust + egui.");
                     let (_p, cancel) = footer(ui, "Close", true);
                     if _p || cancel {
                         close = true;
@@ -889,227 +443,6 @@ fn properties_body(
         }
     });
 }
-
-const PREVIEW_CAP: usize = 2_000;
-
-/// Toggle chip — a small pill that lights up accent when on.
-fn chip(ui: &mut egui::Ui, label: &str, on: bool) -> egui::Response {
-    let accent = ui.visuals().selection.stroke.color;
-    let mut b = egui::Button::new(if on {
-        egui::RichText::new(label)
-            .color(egui::Color32::WHITE)
-            .size(13.0)
-    } else {
-        egui::RichText::new(label).size(13.0)
-    })
-    .corner_radius(egui::CornerRadius::same(14))
-    .min_size(egui::vec2(0.0, 28.0));
-    if on {
-        b = b.fill(accent).stroke(egui::Stroke::NONE);
-    }
-    ui.add(b)
-}
-
-fn bulk_rename_dialog(
-    app: &mut FluxApp,
-    br: &mut BulkRenameState,
-    ctx: &egui::Context,
-    close: &mut bool,
-) {
-    if br.dirty && br.plan.is_empty() {
-        br.recompute();
-    }
-    let n_ready = br.plan.iter().filter(|a| a.status.is_ready()).count();
-    let n_skip = br.plan.len() - n_ready;
-    let mut apply = false;
-    card("Bulk Rename")
-        .resizable(true)
-        .default_size([440.0, 470.0])
-        .min_size([380.0, 300.0])
-        .show(ctx, |ui| {
-            heading(ui, &format!("Rename {} items", br.plan.len()));
-            ui.add_space(8.0);
-
-            // Core flow: find → replace → preview → rename.
-            ui.label(egui::RichText::new("Find").weak().small());
-            let find_r = ui.add(
-                egui::TextEdit::singleline(&mut br.find)
-                    .desired_width(f32::INFINITY)
-                    .margin(egui::Margin::symmetric(10, 8)),
-            );
-            if find_r.changed() {
-                br.dirty = true;
-                br.last_edit = std::time::Instant::now();
-            }
-            ui.add_space(6.0);
-            ui.label(egui::RichText::new("Replace with").weak().small());
-            if ui
-                .add(
-                    egui::TextEdit::singleline(&mut br.replace)
-                        .desired_width(f32::INFINITY)
-                        .margin(egui::Margin::symmetric(10, 8)),
-                )
-                .changed()
-            {
-                br.dirty = true;
-                br.last_edit = std::time::Instant::now();
-            }
-            ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                if chip(ui, "Regex", br.regex).clicked() {
-                    br.regex = !br.regex;
-                    br.dirty = true;
-                }
-                if chip(ui, "Match case", br.case_sensitive).clicked() {
-                    br.case_sensitive = !br.case_sensitive;
-                    br.dirty = true;
-                }
-                if chip(ui, "Number", br.numbering).clicked() {
-                    br.numbering = !br.numbering;
-                    br.dirty = true;
-                }
-            });
-            if br.numbering {
-                ui.add_space(6.0);
-                ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("Start").weak().small());
-                    if ui.add(egui::DragValue::new(&mut br.num_start)).changed() {
-                        br.dirty = true;
-                    }
-                    ui.label(egui::RichText::new("Pad").weak().small());
-                    if ui
-                        .add(egui::DragValue::new(&mut br.num_pad).range(0..=8))
-                        .changed()
-                    {
-                        br.dirty = true;
-                    }
-                    if chip(ui, "Number first", br.num_prefix).clicked() {
-                        br.num_prefix = !br.num_prefix;
-                        br.dirty = true;
-                    }
-                });
-            }
-            ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("Case").weak().small());
-                for (i, l) in ["Keep", "UPPER", "lower", "Title"].iter().enumerate() {
-                    if chip(ui, l, br.case_mode == i).clicked() {
-                        br.case_mode = i;
-                        br.dirty = true;
-                    }
-                }
-            });
-
-            egui::CollapsingHeader::new("Advanced: template")
-                .default_open(false)
-                .show(ui, |ui| {
-                    if ui
-                        .add(
-                            egui::TextEdit::singleline(&mut br.template)
-                                .desired_width(f32::INFINITY)
-                                .margin(egui::Margin::symmetric(10, 8))
-                                .hint_text("{name}{ext}"),
-                        )
-                        .changed()
-                    {
-                        br.dirty = true;
-                        br.last_edit = std::time::Instant::now();
-                    }
-                    ui.weak("{name} {ext} {n} {n:000} {parent}");
-                });
-            ui.add_space(4.0);
-
-            // Live preview — the confirmation of what will happen.
-            ui.label(
-                egui::RichText::new(format!("Preview — {n_ready} ready · {n_skip} skipped"))
-                    .weak()
-                    .small(),
-            );
-            egui::Frame::group(ui.style()).show(ui, |ui| {
-                egui::ScrollArea::both()
-                    .id_salt("bulk_preview")
-                    .max_height(180.0)
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        egui::Grid::new("bulk_grid").striped(true).show(ui, |ui| {
-                            for a in br.plan.iter().take(PREVIEW_CAP) {
-                                let src_n = a
-                                    .src
-                                    .file_name()
-                                    .map(|n| n.to_string_lossy().into_owned())
-                                    .unwrap_or_default();
-                                let dst_n = a
-                                    .dst
-                                    .file_name()
-                                    .map(|n| n.to_string_lossy().into_owned())
-                                    .unwrap_or_default();
-                                let col = match &a.status {
-                                    RenameStatus::Ready => ui.visuals().text_color(),
-                                    RenameStatus::Unchanged => ui.visuals().weak_text_color(),
-                                    _ => ui.visuals().error_fg_color,
-                                };
-                                ui.label(egui::RichText::new(src_n).color(col).size(12.5));
-                                let (ar, _) = ui.allocate_exact_size(
-                                    egui::Vec2::splat(12.0),
-                                    egui::Sense::hover(),
-                                );
-                                crate::glyphs::paint_glyph(
-                                    ui.painter(),
-                                    ar,
-                                    crate::glyphs::Glyph::Forward,
-                                    ui.visuals().weak_text_color(),
-                                );
-                                ui.label(egui::RichText::new(dst_n).color(col).size(12.5));
-                                if !a.status.is_ready() && a.status != RenameStatus::Unchanged {
-                                    ui.label(
-                                        egui::RichText::new(format!("{:?}", a.status))
-                                            .small()
-                                            .color(ui.visuals().error_fg_color),
-                                    );
-                                }
-                                ui.end_row();
-                            }
-                        });
-                        if br.plan.len() > PREVIEW_CAP {
-                            ui.weak(format!("…and {} more", br.plan.len() - PREVIEW_CAP));
-                        }
-                    });
-            });
-
-            ui.add_space(6.0);
-            ui.horizontal(|ui| {
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if n_ready > 0 {
-                        if crate::menu::primary_button(ui, &format!("Rename {n_ready} items"))
-                            .clicked()
-                        {
-                            apply = true;
-                        }
-                    } else {
-                        ui.add_enabled(false, egui::Button::new(format!("Rename {n_ready} items")));
-                    }
-                    ui.add_space(4.0);
-                    if crate::menu::ghost_button(ui, "Cancel").clicked() {
-                        *close = true;
-                    }
-                });
-            });
-        });
-    let esc_pressed = ctx.input(|i| i.key_pressed(egui::Key::Escape));
-    if apply {
-        let actions = std::mem::take(&mut br.plan);
-        app.ops.submit(
-            OpKind::BatchRename { actions },
-            flux_operations::ConflictPolicy::Ask,
-        );
-        *close = true;
-    }
-    if esc_pressed {
-        *close = true;
-    }
-    let _ = RenameRule::ChangeCase;
-}
-
 /// Context menu for a file row. `items`: paths the action applies to.
 pub fn row_context_menu(app: &mut FluxApp, ui: &mut egui::Ui, items: &[PathBuf]) {
     use crate::format::MOD_KEY as CMD;
@@ -1118,8 +451,9 @@ pub fn row_context_menu(app: &mut FluxApp, ui: &mut egui::Ui, items: &[PathBuf])
     let single = items.len() == 1;
     let first = items.first().cloned();
     let single_dir = single && first.as_ref().is_some_and(|p| p.is_dir());
+    use crate::glyphs::Glyph;
     let clipboard_ready = !app.clipboard.items.is_empty() || app.ext_clipboard.is_some();
-    if m::item(ui, "Open").clicked() {
+    if m::item_icon(ui, Glyph::External, "Open").clicked() {
         ui.close();
         if let Some(p) = first.clone() {
             if p.is_dir() {
@@ -1131,11 +465,11 @@ pub fn row_context_menu(app: &mut FluxApp, ui: &mut egui::Ui, items: &[PathBuf])
     }
     if single_dir {
         let p = first.clone().unwrap();
-        if m::item(ui, "Open in New Tab").clicked() {
+        if m::item_icon(ui, Glyph::Plus, "Open in New Tab").clicked() {
             ui.close();
             app.new_tab_at(p.clone());
         }
-        if m::item(ui, "Open Terminal Here").clicked() {
+        if m::item_icon(ui, Glyph::Terminal, "Open Terminal Here").clicked() {
             ui.close();
             let _ = flux_platform::open_in_terminal(&p);
         }
@@ -1173,21 +507,21 @@ pub fn row_context_menu(app: &mut FluxApp, ui: &mut egui::Ui, items: &[PathBuf])
             }
         });
     }
-    if single && m::item(ui, "Reveal in File Manager").clicked() {
+    if single && m::item_icon(ui, Glyph::Folder, "Reveal in File Manager").clicked() {
         ui.close();
         if let Some(p) = first.clone() {
             let _ = flux_platform::reveal_path(&p);
         }
     }
     m::sep(ui);
-    if m::item_shortcut(ui, "Cut", &format!("{CMD}+X")).clicked() {
+    if m::item_icon_sc(ui, Glyph::Cut, "Cut", &format!("{CMD}+X")).clicked() {
         ui.close();
         flux_platform::clipboard::write_files(items, true);
         app.ext_clipboard = None;
         app.clipboard.items = items.to_vec();
         app.clipboard.cut = true;
     }
-    if m::item_shortcut(ui, "Copy", &format!("{CMD}+C")).clicked() {
+    if m::item_icon_sc(ui, Glyph::Copy, "Copy", &format!("{CMD}+C")).clicked() {
         ui.close();
         flux_platform::clipboard::write_files(items, false);
         app.ext_clipboard = None;
@@ -1196,12 +530,12 @@ pub fn row_context_menu(app: &mut FluxApp, ui: &mut egui::Ui, items: &[PathBuf])
     }
     if single_dir
         && clipboard_ready
-        && m::item_shortcut(ui, "Paste Into Folder", &format!("{CMD}+V")).clicked()
+        && m::item_icon_sc(ui, Glyph::Paste, "Paste Into Folder", &format!("{CMD}+V")).clicked()
     {
         ui.close();
         app.submit_copy(first.clone().unwrap());
     }
-    if m::item_shortcut(ui, "Duplicate", &format!("{CMD}+D")).clicked() {
+    if m::item_icon_sc(ui, Glyph::Copy, "Duplicate", &format!("{CMD}+D")).clicked() {
         ui.close();
         app.ops.submit(
             flux_operations::OpKind::Duplicate {
@@ -1210,7 +544,7 @@ pub fn row_context_menu(app: &mut FluxApp, ui: &mut egui::Ui, items: &[PathBuf])
             flux_operations::ConflictPolicy::SkipAll,
         );
     }
-    if m::item(ui, "Compress to .zip").clicked() {
+    if m::item_icon(ui, Glyph::Archive, "Compress to .zip").clicked() {
         ui.close();
         app.compress_items(items.to_vec());
     }
@@ -1234,7 +568,7 @@ pub fn row_context_menu(app: &mut FluxApp, ui: &mut egui::Ui, items: &[PathBuf])
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_else(|| "extracted".into());
         let label = format!("Extract to \"{stem}/\"");
-        if m::item(ui, &label).clicked() {
+        if m::item_icon(ui, Glyph::Archive, &label).clicked() {
             ui.close();
             // Reserve a free sibling dir name; extract still guards races.
             let mut dest = parent.join(&stem);
@@ -1246,7 +580,7 @@ pub fn row_context_menu(app: &mut FluxApp, ui: &mut egui::Ui, items: &[PathBuf])
             }
             app.extract_archive(archive.clone(), dest);
         }
-        if m::item(ui, "Extract Here").clicked() {
+        if m::item_icon(ui, Glyph::Archive, "Extract Here").clicked() {
             ui.close();
             app.extract_archive(archive.clone(), parent);
         }
@@ -1265,8 +599,9 @@ pub fn row_context_menu(app: &mut FluxApp, ui: &mut egui::Ui, items: &[PathBuf])
     }
     m::sep(ui);
     let rename_sc = if single { "F2" } else { "" };
-    if m::item_shortcut(
+    if m::item_icon_sc(
         ui,
+        Glyph::Pencil,
         if single {
             "Rename…"
         } else {
@@ -1288,7 +623,7 @@ pub fn row_context_menu(app: &mut FluxApp, ui: &mut egui::Ui, items: &[PathBuf])
                 };
             }
         } else {
-            app.dialog = Dialog::BulkRename(BulkRenameState::new(items.to_vec()));
+            app.open_bulk_rename(items.to_vec());
         }
     }
     if single_dir
@@ -1299,18 +634,18 @@ pub fn row_context_menu(app: &mut FluxApp, ui: &mut egui::Ui, items: &[PathBuf])
         app.pin_to_sidebar(first.clone().unwrap());
     }
     m::sep(ui);
-    if m::item_shortcut(ui, "Move to Trash", "Del").clicked() {
+    if m::item_icon_sc(ui, Glyph::Trash, "Move to Trash", "Del").clicked() {
         ui.close();
         app.submit_trash(items.to_vec());
     }
-    if m::item_shortcut(ui, "Delete Permanently…", "Shift+Del").clicked() {
+    if m::item_danger(ui, "Delete Permanently…", "Shift+Del").clicked() {
         ui.close();
         app.dialog = Dialog::ConfirmPermanentDelete {
             items: items.to_vec(),
         };
     }
     m::sep(ui);
-    if m::item_shortcut(ui, "Copy Path", &format!("Shift+{CMD}+C")).clicked() {
+    if m::item_icon_sc(ui, Glyph::Link, "Copy Path", &format!("Shift+{CMD}+C")).clicked() {
         ui.close();
         app.pending_copy_text = Some(
             items
@@ -1320,7 +655,7 @@ pub fn row_context_menu(app: &mut FluxApp, ui: &mut egui::Ui, items: &[PathBuf])
                 .join("\n"),
         );
     }
-    if single && m::item(ui, "Copy Name").clicked() {
+    if single && m::item_icon(ui, Glyph::Copy, "Copy Name").clicked() {
         ui.close();
         if let Some(p) = first.clone() {
             app.pending_copy_text = Some(
@@ -1332,7 +667,7 @@ pub fn row_context_menu(app: &mut FluxApp, ui: &mut egui::Ui, items: &[PathBuf])
     }
     if single
         && let Some(p) = first.clone()
-        && m::item(ui, "Properties").clicked()
+        && m::item_icon(ui, Glyph::Info, "Properties").clicked()
     {
         ui.close();
         app.dialog = Dialog::Properties {
@@ -1348,13 +683,14 @@ pub fn bg_context_menu(app: &mut FluxApp, ui: &mut egui::Ui) {
     use crate::format::MOD_KEY as CMD;
     use crate::menu as m;
     m::begin(ui, 200.0);
-    if m::item_shortcut(ui, "New Folder…", &format!("Shift+{CMD}+N")).clicked() {
+    use crate::glyphs::Glyph;
+    if m::item_icon_sc(ui, Glyph::Folder, "New Folder…", &format!("Shift+{CMD}+N")).clicked() {
         ui.close();
         app.dialog = Dialog::NewFolder {
             input: String::new(),
         };
     }
-    if m::item(ui, "New File…").clicked() {
+    if m::item_icon(ui, Glyph::Plus, "New File…").clicked() {
         ui.close();
         app.dialog = Dialog::NewFile {
             input: String::new(),
@@ -1424,17 +760,17 @@ pub fn bg_context_menu(app: &mut FluxApp, ui: &mut egui::Ui) {
         }
     });
     m::sep(ui);
-    if m::item_shortcut(ui, "Refresh", "F5").clicked() {
+    if m::item_icon_sc(ui, Glyph::Refresh, "Refresh", "F5").clicked() {
         ui.close();
         app.refresh();
     }
-    if m::item(ui, "Open Terminal Here").clicked() {
+    if m::item_icon(ui, Glyph::Terminal, "Open Terminal Here").clicked() {
         ui.close();
         let p = app.current_path();
         let _ = flux_platform::open_in_terminal(&p);
     }
     m::sep(ui);
-    if m::item(ui, "Properties").clicked() {
+    if m::item_icon(ui, Glyph::Info, "Properties").clicked() {
         ui.close();
         app.dialog = Dialog::Properties {
             path: app.current_path(),
@@ -1474,32 +810,25 @@ fn ops_log_window(app: &mut FluxApp, ctx: &egui::Context) {
                 .max_height(320.0)
                 .auto_shrink([false, true])
                 .show(ui, |ui| {
+                    let pal = crate::theme::Palette::of(&ui.style().visuals);
                     for op in ops.iter().rev() {
                         let p = op.progress_snapshot();
                         ui.horizontal(|ui| {
-                            let (badge, col) = match &p.state {
+                            let col = match &p.state {
                                 flux_operations::OpState::Queued
                                 | flux_operations::OpState::Discovering
-                                | flux_operations::OpState::Running => {
-                                    ("▶", ui.visuals().text_color())
-                                }
-                                flux_operations::OpState::WaitingConflict => {
-                                    ("?", ui.visuals().warn_fg_color)
-                                }
-                                flux_operations::OpState::Done => {
-                                    ("✓", egui::Color32::from_rgb(90, 170, 90))
-                                }
-                                flux_operations::OpState::DoneWithErrors => {
-                                    ("!", egui::Color32::from_rgb(220, 160, 60))
-                                }
-                                flux_operations::OpState::Cancelled => {
-                                    ("✕", ui.visuals().weak_text_color())
-                                }
-                                flux_operations::OpState::Failed(_) => {
-                                    ("✕", egui::Color32::from_rgb(220, 90, 90))
-                                }
+                                | flux_operations::OpState::Running => pal.accent,
+                                flux_operations::OpState::WaitingConflict => pal.warn,
+                                flux_operations::OpState::Done => pal.success,
+                                flux_operations::OpState::DoneWithErrors => pal.warn,
+                                flux_operations::OpState::Cancelled => pal.text_muted,
+                                flux_operations::OpState::Failed(_) => pal.danger,
                             };
-                            ui.label(egui::RichText::new(badge).color(col).monospace());
+                            let (dot, _) = ui.allocate_exact_size(
+                                egui::vec2(14.0, ui.spacing().interact_size.y),
+                                egui::Sense::hover(),
+                            );
+                            ui.painter().circle_filled(dot.center(), 3.5, col);
                             ui.label(&op.label);
                             if p.state.is_active()
                                 && let Some(frac) = p.fraction()
