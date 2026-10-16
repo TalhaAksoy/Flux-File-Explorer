@@ -136,6 +136,16 @@ impl DirSnapshot {
         self.version += 1;
     }
 
+    /// Write an opt-in computed directory size into an entry — same
+    /// append-only index contract as [`apply_meta`], used by the
+    /// folder-size worker when its walk completes.
+    pub fn apply_size(&mut self, idx: EntryIdx, bytes: u64) {
+        if let Some(e) = self.entries.get_mut(idx as usize) {
+            e.size = bytes;
+            self.version += 1;
+        }
+    }
+
     pub fn finish(&mut self) {
         self.state = LoadState::Ready {
             total: self.entries.len(),

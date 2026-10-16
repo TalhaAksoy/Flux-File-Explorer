@@ -21,6 +21,17 @@ pub enum Density {
     Comfortable,
 }
 
+/// File-pane presentation. `List` is the classic details table; `Compact`
+/// a names-only dense list; `Grid`/`Gallery` icon cells (Gallery = large).
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub enum ViewMode {
+    #[default]
+    List,
+    Compact,
+    Grid,
+    Gallery,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Settings {
     pub theme: Theme,
@@ -30,6 +41,12 @@ pub struct Settings {
     /// Stronger gate than `show_hidden`, mirroring Explorer's option.
     #[serde(default)]
     pub show_system_files: bool,
+    /// Right-side preview panel (Alt+P / status-bar toggle).
+    #[serde(default)]
+    pub show_preview: bool,
+    /// File-pane view mode (details list / compact / grid / gallery).
+    #[serde(default)]
+    pub view_mode: ViewMode,
     pub confirm_permanent_delete: bool,
     /// Saved tab paths for session restore.
     pub tabs: Vec<PathBuf>,
@@ -73,6 +90,8 @@ impl Default for Settings {
             density: Density::Standard,
             show_hidden: false,
             show_system_files: false,
+            show_preview: false,
+            view_mode: ViewMode::List,
             confirm_permanent_delete: true,
             tabs: Vec::new(),
             bookmarks: Vec::new(),
