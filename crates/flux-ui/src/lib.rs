@@ -13,6 +13,7 @@ pub mod glyphs;
 pub mod icon_cache;
 pub mod menu;
 pub mod pane;
+pub mod terminal;
 pub mod theme;
 pub mod view;
 
@@ -501,6 +502,9 @@ impl eframe::App for FluxApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.ensure_started();
+        // A focused embedded terminal owns the keyboard — drain key/text
+        // events into PTY bytes before global shortcuts can see them.
+        self.terminal_input(&ctx);
         self.handle_keys(&ctx);
 
         // OS file drop → copy into current dir.
@@ -569,6 +573,23 @@ impl eframe::App for FluxApp {
             .show(ui, |ui| {
                 chrome::status_bar(self, ui, &mut act);
             });
+        // Docked terminal — created after the status panel so it stacks
+        // directly above it, code-editor style.
+        if self.terminal.is_some() {
+            let term_frame = egui::Frame::default()
+                .fill(theme::chrome_fill(dark))
+                .inner_margin(egui::Margin::symmetric(10, 4));
+            egui::Panel::bottom("terminal")
+                .resizable(true)
+                .size_range(120.0..=600.0)
+                .default_size(200.0)
+                .show_separator_line(false)
+                .frame(term_frame)
+                .show(ui, |ui| {
+                    let pal = theme::Palette::of(&ui.style().visuals);
+                    self.terminal_panel(ui, &pal);
+                });
+        }
         let mut row_action = view::RowAction::default();
         let central = egui::CentralPanel::default().show(ui, |ui| {
             if self.search_ui.active {

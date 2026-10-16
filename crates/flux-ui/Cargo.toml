@@ -18,6 +18,8 @@ eframe.workspace = true
 jiff.workspace = true
 rustc-hash.workspace = true
 tracing.workspace = true
+portable-pty.workspace = true
+alacritty_terminal.workspace = true
 
 # Drag files OUT of the window to the OS. macOS/Windows only — the Linux
 # GTK backend can't interoperate with winit (documented limitation).

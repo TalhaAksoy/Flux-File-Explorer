@@ -298,6 +298,8 @@ pub struct FluxApp {
     /// section it came from (kept separate from `dragging`, which is
     /// file-row drags into directories).
     pub sidebar_drag: Option<SidebarDrag>,
+    /// Docked embedded terminal panel (None = closed).
+    pub terminal: Option<crate::terminal::EmbeddedTerm>,
 }
 
 /// Which sidebar section a reorder drag belongs to — a path that exists in
@@ -404,6 +406,7 @@ impl FluxApp {
             reported_ops: rustc_hash::FxHashSet::default(),
             wake_installed: false,
             sidebar_drag: None,
+            terminal: None,
         }
     }
 

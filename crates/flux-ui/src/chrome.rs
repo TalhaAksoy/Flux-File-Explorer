@@ -749,11 +749,20 @@ pub fn status_bar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) 
                     pal.text_secondary
                 },
             );
-            let resp = resp.on_hover_text("Open Terminal Here");
+            let resp = resp.on_hover_text(if app.terminal.is_some() {
+                "Close terminal panel"
+            } else {
+                "Open terminal panel"
+            });
             if resp.clicked() {
-                let dir = app.current_path();
-                if let Err(e) = flux_platform::open_in_terminal(&dir) {
-                    app.toast(format!("Terminal: {e}"));
+                if app.terminal.is_some() {
+                    app.terminal = None;
+                } else {
+                    let dir = app.current_path();
+                    match crate::terminal::EmbeddedTerm::spawn(dir, &ui.ctx().clone()) {
+                        Some(t) => app.terminal = Some(t),
+                        None => app.toast("Could not open a terminal".to_string()),
+                    }
                 }
             }
         }
