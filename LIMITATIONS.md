@@ -68,6 +68,25 @@ Stage B feature wave.
   build on all three OSes, but only macOS has been runtime-smoked in
   this iteration.
 
+## Workspace tabs (dev/ui-overhaul)
+
+- **Workspace tabs are session-only** — Settings and Bulk Rename tabs
+  are never persisted; only directory paths restore across launches
+  (matches Explorer/Finder behavior — workspaces are transient tasks).
+- **Bulk Rename close guard** — closing a Bulk Rename tab that holds an
+  unexecuted plan asks for confirmation; switching tabs is always free
+  and keeps the plan alive.
+- **Esc layering** — on a workspace tab, Esc returns to the most recent
+  directory tab without destroying workspace state. Directory tabs keep
+  their original Esc semantics (clear selection/exit search).
+- **Directory-scoped actions on workspaces** — sort/view/density
+  changes made from the background menu while a workspace is active
+  apply to the most recent directory tab; commands that need a real
+  path are inert.
+- **Menu icons** — every context-menu and submenu item now carries a
+  painted vector glyph (consistent 14 px icon column); checked items
+  keep their checkmark in that column.
+
 ## Wired since last update
 
 - **Windows hidden/system attributes** — `FILE_ATTRIBUTE_HIDDEN` and
@@ -107,6 +126,37 @@ Stage B feature wave.
 - **Idle repaint on metadata progress** — `MetaEvent::Batch` repaints
   are coalesced to ~30 fps (`last_meta_repaint`); `Finished` still
   repaints immediately.
+
+## Manual smoke checklist (UI overhaul + freeze fix)
+
+Steps that automated tests can't cover — run before merging to master:
+
+1. **Downloads freeze regression** — open a large directory containing
+   images (1000+ files, thumbnails on), scroll, resize. App must stay
+   responsive; the pre-fix build deadlocked on the second frame after a
+   thumbnail decoded. Regression test:
+   `texture_on_cached_path_does_not_deadlock` (crates/flux-ui/src/thumbs.rs).
+2. **Busy directory** — while a large dir scans, run
+   `while true; do touch /tmp/x; mv /tmp/x $DIR/churn_$RANDOM; sleep 0.3; done`.
+   Enumeration must finish once, not restart per event; one trailing
+   refresh after the scan is expected.
+3. **Workspace tabs** — open Settings (gear) and Bulk Rename (select
+   several files → Rename… (batch)). Both appear as tabs alongside
+   directory tabs, keep full state when switching away and back, close
+   via ×/Ctrl+W/middle-click. Closing a Bulk Rename tab with an
+   unexecuted plan must show a confirmation dialog.
+4. **Esc layering** — on Settings, Esc returns to the last directory
+   tab without closing the workspace. On a directory tab, Esc clears
+   selection/exits search as before.
+5. **Persistence** — quit with Settings+Bulk Rename tabs open; relaunch
+   restores only directory tabs.
+6. **Menus** — right-click a file, a folder, empty space, a sidebar
+   bookmark, and a tab: every item shows a glyph; submenus (Open With,
+   Sort By, View, Row Density) show icons on their triggers and
+   checkmarks on checked entries.
+7. **Screenshot harness** —
+   `FLUX_SHOT_OUT=x.png FLUX_SHOT_SCREEN=settings FLUX_SHOT_MENU=row
+   ./flux-files` captures rendered QA shots without interaction.
 
 ## Platform notes
 
