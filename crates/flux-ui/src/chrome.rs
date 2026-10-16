@@ -315,11 +315,29 @@ pub fn sidebar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
                     egui::Vec2::new(ui.available_width(), 28.0),
                     egui::Sense::click(),
                 );
+                // Ellipsize the hint if the sidebar is too narrow for it —
+                // never let text bleed past the panel edge.
+                const HINT: &str = "Drop folders here";
+                let font = egui::FontId::proportional(11.5);
+                let mut n = HINT.chars().count();
+                let mut hint = HINT.to_string();
+                loop {
+                    let w = ui
+                        .painter()
+                        .layout_no_wrap(hint.clone(), font.clone(), pal.text_muted)
+                        .rect
+                        .width();
+                    if w <= rect.width() - 12.0 || n <= 2 {
+                        break;
+                    }
+                    n -= 1;
+                    hint = format!("{}…", HINT.chars().take(n).collect::<String>().trim_end());
+                }
                 ui.painter().text(
                     rect.center(),
                     egui::Align2::CENTER_CENTER,
-                    "Drop folders here · click or right-click to add",
-                    egui::FontId::proportional(11.5),
+                    hint,
+                    font,
                     pal.text_muted,
                 );
                 resp.context_menu(|ui| {
