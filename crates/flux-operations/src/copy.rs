@@ -177,10 +177,20 @@ pub fn is_descendant_or_same(src: &Path, dst: &Path) -> bool {
 
 #[cfg(windows)]
 fn path_starts_with(p: &Path, prefix: &Path) -> bool {
-    // Windows filesystems are overwhelmingly case-insensitive.
-    p.to_string_lossy()
-        .to_lowercase()
-        .starts_with(prefix.to_string_lossy().to_lowercase().as_str())
+    // Windows filesystems are overwhelmingly case-insensitive — but the
+    // comparison must stay component-wise: a raw string prefix treats
+    // the sibling "docs copy" as inside "docs" and wrongly rejects
+    // duplicates/moves between prefix-sharing names.
+    let mut pc = p.components();
+    for pre in prefix.components() {
+        let Some(c) = pc.next() else { return false };
+        if c.as_os_str().to_string_lossy().to_lowercase()
+            != pre.as_os_str().to_string_lossy().to_lowercase()
+        {
+            return false;
+        }
+    }
+    true
 }
 
 #[cfg(not(windows))]
