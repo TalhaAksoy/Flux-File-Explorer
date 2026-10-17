@@ -40,6 +40,7 @@ for name, overrides in cases:
             del env[key]
     config = output / f"{name}.json"
     config.unlink(missing_ok=True)
+    (output / f"{name}.egui.ron").unlink(missing_ok=True)
     env.update({"FLUX_SETTINGS_PATH": str(config), "FLUX_SHOT_OUT": str(output / f"{name}.png"),
                 "FLUX_SHOT_DIR": str(fixture), "FLUX_SHOT_SIZE": "1440x900", "FLUX_SHOT_WAIT": "90"})
     if "PREVIEW" not in overrides:

@@ -153,7 +153,17 @@ fn item_full(
         fg,
         (r.rect.width() - 36.0 - shortcut_width).max(0.0),
     );
-    r.on_hover_text(label)
+    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, label));
+    let full_width = ui
+        .painter()
+        .layout_no_wrap(label.to_owned(), egui::FontId::proportional(13.5), fg)
+        .size()
+        .x;
+    if full_width > (r.rect.width() - 36.0 - shortcut_width).max(0.0) {
+        r.on_hover_text(label)
+    } else {
+        r
+    }
 }
 
 /// Item with a painted checkmark when `checked` — no font dependency.

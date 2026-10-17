@@ -1274,6 +1274,11 @@ pub fn run(start_dir: Option<PathBuf>) -> eframe::Result<()> {
             .with_inner_size(shot_size.unwrap_or([1060.0, 680.0]))
             .with_min_inner_size([560.0, 360.0]),
         renderer: eframe::Renderer::Glow,
+        // QA must neither inherit nor overwrite the user's egui panel
+        // geometry. FLUX_SETTINGS_PATH only isolates Flux preferences.
+        persistence_path: std::env::var_os("FLUX_SHOT_OUT")
+            .map(|out| PathBuf::from(out).with_extension("egui.ron")),
+        persist_window: std::env::var_os("FLUX_SHOT_OUT").is_none(),
         ..Default::default()
     };
     eframe::run_native(
