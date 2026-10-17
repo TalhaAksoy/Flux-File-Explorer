@@ -1586,15 +1586,16 @@ impl FluxApp {
                             continue;
                         };
                         if d.gen_id == gen_id {
-                            // Final global sort on the compute thread.
+                            // Mark ready before queuing compute: finish() bumps
+                            // the snapshot version and would invalidate a fast sort.
+                            if let Ok(mut s) = d.snap.write() {
+                                s.finish();
+                            }
                             self.compute.rebuild(&d.snap, gen_id);
                             // Deferred metadata: stat entries in background.
                             self.meta_engine.fill(&d.snap, gen_id);
                             if let Some(names) = d.reselect_after_load.take() {
                                 d.pending_reselect = Some(names);
-                            }
-                            if let Ok(mut s) = d.snap.write() {
-                                s.finish();
                             }
                             // A watcher event deferred during this scan —
                             // run exactly one trailing rescan.
@@ -1632,8 +1633,9 @@ impl FluxApp {
             ctx.request_repaint();
         }
         // Metadata-fill events: sizes/dates arrive progressively — repaint to
-        // show them; on finish, rebuild the view if the sort depends on
-        // metadata so the final order is exact.
+        // show them. Completion always rebuilds: metadata version bumps
+        // can invalidate even a Name sort, and hidden/system flags can
+        // change visibility independently of the selected sort column.
         for ev in self.meta_engine.drain_events().collect::<Vec<_>>() {
             match ev {
                 MetaEvent::Batch { .. } => {
@@ -1654,12 +1656,7 @@ impl FluxApp {
                         let Some(d) = tab.dir_mut() else {
                             continue;
                         };
-                        if d.gen_id == gen_id
-                            && matches!(
-                                d.snap.read().map(|s| s.sort.key),
-                                Ok(SortKey::Size | SortKey::Modified)
-                            )
-                        {
+                        if d.gen_id == gen_id {
                             self.compute.rebuild(&d.snap, gen_id);
                         }
                     }
