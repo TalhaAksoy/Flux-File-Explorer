@@ -8,13 +8,13 @@ Neutral, closely-related tonal surfaces with a single restrained blue accent. De
 
 Surfaces: `bg_window` (chrome), `bg_sidebar`, `bg_content`, `bg_elevated` (popovers/dialogs/active tabs), `field_inset` (inputs), `stripe` (alternating rows), `surface_hover` / `surface_active` / `surface_selected`.
 
-Text: `text_primary`, `text_secondary`, `text_muted`, plus `accent`, `danger`, `warn`.
+Text: `text_primary`, `text_secondary`, `text_muted`, plus `accent`, `danger`, `warn`. `accent_solid` is the opaque primary-action fill with white labels; it is deliberately darker than the focus/icon accent.
 
 Interaction: `accent` (solid, primary actions/selection edge), `accent_fill` (translucent tint for selections/focused chrome), `border_soft` (functional hairlines only).
 
 ## Typography
 
-One UI family (system sans; user-selectable bundled/system fonts) + monospace for terminal/code. Scale: page title ~22pt, section heading ~15pt, body/controls 13.5pt, secondary 11.5-12pt, fine metadata 11.5pt. Hierarchy through size + muted color, not uppercase microtype.
+One UI family (system sans; user-selectable bundled/system fonts) + monospace for terminal/code. Shared logical-point metrics: page title 22pt, section heading 16pt, body 14pt, secondary 12.5pt. Hierarchy through size and foreground contrast, not uppercase microtype. Some specialized controls retain local type sizes.
 
 ## Spacing scale
 
@@ -29,6 +29,8 @@ Corner radii: controls 6-7, menus/popovers 10, windows/cards 12. Soft single dro
 - Buttons: `primary` (accent fill, white text), `secondary` (surface fill), `ghost` (transparent until hover), `destructive` (danger fill/text).
 - Inputs: recessed `field_inset` fill, 6px radius, accent focus edge.
 - Menus: elevated surface, 10px radius, 30px rows, leading icon/check column, right-aligned shortcuts, painted submenu arrow, soft separators between groups only.
-- Settings page: left category nav (icon + label, selected pill), centered content column (max ~880px), label+description left / control right rows.
-- Bulk Rename: header + left rule column (~360-420px) + right virtualized before/after preview + sticky footer with validation summary.
+- Controls: 34pt standard buttons, 32pt segmented controls and tabs, 40pt settings navigation. File density row heights: 24 / 30 / 36pt.
+- Settings page: left category nav (icon + label, selected pill), adjacent readable content column (max 840pt), label+description left / control right rows, stacking below 620pt of content width. The global Places sidebar is suppressed on workspace tabs.
+- Bulk Rename: header + 340pt rule column + virtualized comparison capped at 840pt + sticky footer with validation summary. Below 920pt, rules use a disclosure instead of a permanent column.
+- Gallery: lazily created 256px thumbnail cache, capped at 64 entries (16 MiB of RGBA texels); Details/Grid retain the 64px cache. Non-image glyphs do not expand to photo-thumbnail size.
 - Empty states: centered painted glyph + short message + one contextual action.
