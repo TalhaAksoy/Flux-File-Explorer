@@ -689,6 +689,8 @@ impl FluxApp {
     /// Build the app around an explicit settings value — tests use this
     /// to avoid touching the real user config.
     pub fn from_settings(settings: Settings) -> Self {
+        let icons = std::rc::Rc::new(crate::icon_cache::IconCache::new());
+        icons.set_source(settings.icon_source);
         let mut next_id = 0u64;
         let mut alloc = || {
             next_id += 1;
@@ -762,7 +764,7 @@ impl FluxApp {
             status_msg: None,
             pending_copy_text: None,
             ext_clipboard: None,
-            icons: std::rc::Rc::new(crate::icon_cache::IconCache::new()),
+            icons,
             thumbs: std::rc::Rc::new(crate::thumbs::ThumbCache::new()),
             gallery_thumbs: None,
             dragging: None,
@@ -860,6 +862,7 @@ impl FluxApp {
     /// recently used directory tab (creating one if none exists) —
     /// sidebar/drop actions stay usable from any workspace.
     pub fn navigate(&mut self, path: PathBuf) {
+        self.icons.invalidate_evidence();
         if self.current_dir().is_none() {
             if let Some(i) = self.tabs.iter().rposition(|t| t.dir().is_some()) {
                 self.active = i;
@@ -898,6 +901,7 @@ impl FluxApp {
     /// Re-enumerate the current directory, preserving selection by name.
     /// No-op on application tabs.
     pub fn refresh(&mut self) {
+        self.icons.invalidate_evidence();
         let Some((snap, path)) = self.current_dir_mut().map(|tab| {
             let s = tab.snap.read().unwrap();
             let names = tab.sel.selected_names(&s);
@@ -937,6 +941,7 @@ impl FluxApp {
     }
 
     fn navigate_no_history(&mut self, path: PathBuf) {
+        self.icons.invalidate_evidence();
         let Some(snap) = self.current_dir_mut().map(|tab| {
             tab.sel.clear();
             tab.snap.clone()
@@ -1575,6 +1580,7 @@ impl FluxApp {
     /// Per-frame pump: engine events, watcher, ops, search. Returns whether
     /// anything needs a repaint (we request_repaint anyway on any event).
     pub fn pump(&mut self, ctx: &egui::Context) {
+        self.icons.set_source(self.settings.icon_source);
         // Enumeration events.
         let enum_events: Vec<_> = self.enum_engine.drain_events().collect();
         for ev in enum_events {

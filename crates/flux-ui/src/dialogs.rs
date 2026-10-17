@@ -360,7 +360,7 @@ pub fn show(app: &mut FluxApp, ctx: &egui::Context) {
                 .show(ctx, |ui| {
                     heading(ui, "Properties");
                     ui.add_space(6.0);
-                    properties_body(ui, &p, meta, ctx);
+                    properties_body(ui, &p, meta, ctx, &app.icons);
                     let (_p, cancel) = footer(ui, "Close", true);
                     if _p || cancel {
                         close = true;
@@ -415,6 +415,7 @@ fn properties_body(
     path: &std::path::Path,
     meta: &mut Option<PropsMeta>,
     ctx: &egui::Context,
+    icons: &crate::icon_cache::IconCache,
 ) {
     // Kick off the stat once; the worker wakes the UI when it lands.
     let slot = meta.get_or_insert_with(|| {
@@ -430,6 +431,16 @@ fn properties_body(
         slot
     });
     let md = slot.lock().unwrap().clone();
+    let kind = match &md {
+        Some(Ok(md)) if md.is_dir() => flux_core::EntryKind::Dir,
+        _ => flux_core::EntryKind::File,
+    };
+    let pal = crate::theme::Palette::of(ui.visuals());
+    ui.horizontal(|ui| {
+        let (rect, _) = ui.allocate_exact_size(egui::Vec2::splat(32.0), egui::Sense::hover());
+        icons.paint(ui.painter(), rect, kind, path, &pal);
+        ui.label(icons.file_type(kind, path).info().label);
+    });
     egui::Grid::new("props").num_columns(2).show(ui, |ui| {
         ui.label("Name");
         ui.label(

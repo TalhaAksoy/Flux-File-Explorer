@@ -113,8 +113,8 @@ fn appearance_segments_fit_narrow_and_wide_workspaces() {
         });
         assert_eq!(
             segments.len(),
-            6,
-            "missing theme/density segments at {width}"
+            9,
+            "missing theme/density/icon_source segments at {width}"
         );
         for (id, r) in &segments {
             assert!(

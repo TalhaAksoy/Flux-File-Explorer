@@ -8,9 +8,11 @@
 pub mod app;
 pub mod chrome;
 pub mod dialogs;
+pub mod file_icons;
 pub mod format;
 pub mod glyphs;
 pub mod icon_cache;
+pub mod icon_evidence;
 pub mod menu;
 pub mod pane;
 pub mod preview;
@@ -428,21 +430,7 @@ impl FluxApp {
                             egui::Vec2::splat(row_h * 0.6),
                             egui::Sense::hover(),
                         );
-                        let key = icon_cache::IconKey::for_entry_path(kind, &h.path);
-                        match icons.peek(&key) {
-                            Some(tex) => {
-                                ui.painter().image(
-                                    tex,
-                                    ir,
-                                    egui::Rect::from_min_max(
-                                        egui::pos2(0.0, 0.0),
-                                        egui::pos2(1.0, 1.0),
-                                    ),
-                                    egui::Color32::WHITE,
-                                );
-                            }
-                            None => view::paint_entry_icon(ui.painter(), ir, kind, &pal),
-                        }
+                        icons.paint(ui.painter(), ir, kind, &h.path, &pal);
                         let resp = ui.selectable_label(false, name);
                         let path_str = h.path.display().to_string();
                         ui.weak(path_str);
@@ -888,13 +876,13 @@ impl eframe::App for FluxApp {
         if self.dragging.is_some() {
             // Translucent row-card ghost following the cursor.
             if let Some(pos) = ctx.pointer_interact_pos() {
-                let (label, n, key, kind) = {
+                let (label, n, path, kind) = {
                     let d = self.dragging.as_ref().unwrap();
                     let first = d.items[0]
                         .file_name()
                         .map(|f| f.to_string_lossy().into_owned())
                         .unwrap_or_default();
-                    (first, d.items.len(), d.key.clone(), d.kind)
+                    (first, d.items.len(), d.items[0].clone(), d.kind)
                 };
                 let copy_hint = ctx.input(|i| i.modifiers.alt);
                 let icons = self.icons.clone();
@@ -911,20 +899,7 @@ impl eframe::App for FluxApp {
                                     egui::Vec2::splat(16.0),
                                     egui::Sense::hover(),
                                 );
-                                match icons.peek(&key) {
-                                    Some(tex) => {
-                                        ui.painter().image(
-                                            tex,
-                                            ir,
-                                            egui::Rect::from_min_max(
-                                                egui::pos2(0.0, 0.0),
-                                                egui::pos2(1.0, 1.0),
-                                            ),
-                                            egui::Color32::WHITE,
-                                        );
-                                    }
-                                    None => view::paint_entry_icon(ui.painter(), ir, kind, &pal),
-                                }
+                                icons.paint_cached(ui.painter(), ir, kind, &path, &pal);
                                 ui.label(&label);
                                 if n > 1 {
                                     ui.weak(format!("+{}", n - 1));
@@ -1252,6 +1227,7 @@ impl eframe::App for FluxApp {
                 {
                     eprintln!("flux: screenshot save failed: {e}");
                 }
+                eprintln!("flux icons: {:?}", self.icons.stats());
                 eprintln!("flux: screenshot → {}", sc.out.display());
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
