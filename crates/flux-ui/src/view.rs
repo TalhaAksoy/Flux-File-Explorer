@@ -574,19 +574,37 @@ fn compact_list(app: &mut FluxApp, ui: &mut egui::Ui, pal: &Palette) -> RowActio
     action
 }
 
+/// Grid column math, kept pure for tests. `avail_w` is the central
+/// region's width (already reduced by the preview panel); `bar_w` is
+/// what a solid scrollbar reserves. `ui.horizontal` inserts `gap`
+/// between cells, so the pitch is `cell_w + gap` — sizing on `cell_w`
+/// alone pushes the last column behind the preview panel. Returns the
+/// (possibly shrunk, ultra-narrow case) cell width and column count;
+/// the row then fits `avail_w` exactly.
+fn grid_cell_cols(avail_w: f32, cell_w: f32, gap: f32, bar_w: f32) -> (f32, usize) {
+    let usable = (avail_w - bar_w).max(1.0);
+    let cell_w = cell_w.min(usable);
+    let cols = (((usable + gap) / (cell_w + gap)).floor() as usize).max(1);
+    (cell_w, cols)
+}
+
 /// Grid/Gallery: fixed-size cells (icon on top, name below) laid out
 /// left-to-right, top-to-bottom. Virtualized by `ScrollArea::show_rows`
 /// over cell-rows — a 100k-entry dir still lays out only the viewport.
 fn icon_grid(app: &mut FluxApp, ui: &mut egui::Ui, pal: &Palette, cell_w: f32) -> RowAction {
     let mut action = RowAction::default();
     let gallery = cell_w > 120.0;
-    let cell_h = cell_w + 20.0; // icon area + one name line
     let Some(snap) = app.current_snap() else {
         return action;
     };
     let view_len = snap.read().map(|s| s.view_len()).unwrap_or(0);
-    let avail_w = ui.available_width().max(cell_w);
-    let cols = ((avail_w / cell_w).floor() as usize).max(1);
+    let (cell_w, cols) = grid_cell_cols(
+        ui.available_width(),
+        cell_w,
+        ui.spacing().item_spacing.x,
+        ui.spacing().scroll.allocated_width(),
+    );
+    let cell_h = cell_w + 20.0; // icon area + one name line
     app.grid_cols = cols;
     let n_rows = view_len.div_ceil(cols);
 
@@ -667,8 +685,14 @@ fn icon_grid(app: &mut FluxApp, ui: &mut egui::Ui, pal: &Palette, cell_w: f32) -
                         }
                         let ghost = if hidden { 0.55 } else { 1.0 };
 
-                        // Icon region: centered in the upper part of the cell.
-                        let icon_side = if gallery { cell_w * 0.78 } else { 44.0 };
+                        // Icon region: centered in the upper part of the
+                        // cell. Capped so a shrunken ultra-narrow cell
+                        // never bleeds into its neighbors.
+                        let icon_side = if gallery {
+                            cell_w * 0.78
+                        } else {
+                            44.0_f32.min(cell_w * 0.7)
+                        };
                         let icon_rect = egui::Rect::from_center_size(
                             egui::pos2(rect.center().x, rect.top() + icon_side * 0.6),
                             Vec2::splat(icon_side),
@@ -753,4 +777,73 @@ fn icon_grid(app: &mut FluxApp, ui: &mut egui::Ui, pal: &Palette, cell_w: f32) -
         action.visible_range = Some((vis_min, vis_max));
     }
     action
+}
+
+#[cfg(test)]
+mod tests {
+    use super::grid_cell_cols;
+
+    /// Row width for a given column count — must never exceed `usable`.
+    fn row_w(cols: usize, cell_w: f32, gap: f32) -> f32 {
+        cols as f32 * (cell_w + gap) - gap
+    }
+
+    #[test]
+    fn grid_cols_never_overflow_available_width() {
+        // Sweep widths around the preview-panel toggle (±280 px) and
+        // confirm the last column always ends inside the viewport.
+        for w in (60..=1600).step_by(7) {
+            let w = w as f32;
+            for &(cell, gap, bar) in &[(96.0, 8.0, 0.0), (200.0, 8.0, 14.0)] {
+                let (cw, cols) = grid_cell_cols(w, cell, gap, bar);
+                assert!(
+                    row_w(cols, cw, gap) <= (w - bar) + f32::EPSILON,
+                    "w={w} cell={cw} cols={cols} overflows (row={})",
+                    row_w(cols, cw, gap)
+                );
+                assert!(cols >= 1);
+            }
+        }
+    }
+
+    #[test]
+    fn grid_cols_reflows_when_panel_opens() {
+        // 1000 px central region; a 280 px preview panel leaves 720.
+        // Old math: floor(720/96)=7 cols → 7*96+6*8=720+... overflow.
+        let (cw_wide, cols_wide) = grid_cell_cols(1000.0, 96.0, 8.0, 0.0);
+        let (cw_narrow, cols_narrow) = grid_cell_cols(720.0, 96.0, 8.0, 0.0);
+        assert!(cols_wide > cols_narrow, "opening panel must reduce cols");
+        assert_eq!(cw_wide, 96.0);
+        assert_eq!(cw_narrow, 96.0);
+        // Every item stays reachable: same item count, more rows.
+        let items = 40usize;
+        assert!(items.div_ceil(cols_narrow) >= items.div_ceil(cols_wide));
+    }
+
+    #[test]
+    fn grid_cols_gap_is_counted() {
+        // Exactly 4 cells of 96 px fit in 400 px only if the gap were
+        // free — with an 8 px gap the honest count is 3.
+        let (cw, cols) = grid_cell_cols(400.0, 96.0, 8.0, 0.0);
+        assert_eq!(cols, 3, "gap must reduce the column count");
+        assert!(row_w(cols, cw, 8.0) <= 400.0);
+    }
+
+    #[test]
+    fn grid_cols_shrinks_cell_on_narrow_layout() {
+        // Viewport narrower than one gallery cell → single shrunken
+        // column instead of a clipped cell.
+        let (cw, cols) = grid_cell_cols(150.0, 200.0, 8.0, 0.0);
+        assert_eq!(cols, 1);
+        assert_eq!(cw, 150.0);
+    }
+
+    #[test]
+    fn grid_cols_reserves_scrollbar_width() {
+        let (cw_a, cols_a) = grid_cell_cols(720.0, 96.0, 8.0, 0.0);
+        let (cw_b, cols_b) = grid_cell_cols(720.0, 96.0, 8.0, 14.0);
+        assert_eq!(cw_a, cw_b);
+        assert!(cols_b <= cols_a);
+        assert!(row_w(cols_b, cw_b, 8.0) <= 720.0 - 14.0 + f32::EPSILON);
+    }
 }
