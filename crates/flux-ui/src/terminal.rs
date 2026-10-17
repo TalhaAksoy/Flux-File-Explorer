@@ -490,7 +490,7 @@ impl FluxApp {
 
         // Header: painted prompt glyph + cwd, spacer, actions. The bundled
         // font lacks ❯/⧉/✕ characters — everything is a drawn Glyph.
-        ui.spacing_mut().interact_size.y = 24.0;
+        ui.spacing_mut().interact_size.y = 30.0;
         let mut close = false;
         let mut external = false;
         let mut cd = false;
@@ -502,11 +502,18 @@ impl FluxApp {
                 crate::glyphs::Glyph::Terminal,
                 pal.accent,
             );
-            ui.label(
-                egui::RichText::new(term.cwd.display().to_string())
-                    .color(pal.text_muted)
-                    .size(11.5),
-            );
+            let cwd = term.cwd.display().to_string();
+            let width = (ui.available_width() - 180.0).max(0.0);
+            ui.add_sized(
+                [width, 30.0],
+                egui::Label::new(
+                    egui::RichText::new(&cwd)
+                        .color(pal.text_secondary)
+                        .size(12.5),
+                )
+                .truncate(),
+            )
+            .on_hover_text(cwd);
             if term.exited {
                 ui.label(
                     egui::RichText::new("· process exited")
@@ -530,7 +537,7 @@ impl FluxApp {
                 )
                 .clicked();
                 cd = ui
-                    .button(egui::RichText::new("↓ cwd").size(11.5))
+                    .button(egui::RichText::new("Follow folder").size(12.5))
                     .on_hover_text("cd to the current folder")
                     .clicked();
             });

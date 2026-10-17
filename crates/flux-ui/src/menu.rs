@@ -5,7 +5,7 @@
 //! `SubMenuButton`'s state lookup walks the stack for a Menu root.
 
 use egui::containers::menu::{self, SubMenuButton};
-use egui::{Button, Color32, CornerRadius, Frame, Margin, Response, RichText, Style, Ui, Vec2};
+use egui::{Button, CornerRadius, Frame, Margin, Response, RichText, Style, Ui, Vec2};
 
 /// Rounded, softly shadowed popup surface.
 pub fn popup_frame(style: &Style) -> Frame {
@@ -103,7 +103,7 @@ fn item_full(
     let w = ui.available_width();
     // Left offset reserves a checkmark/icon column.
     let mut b = Button::new(RichText::new(""))
-        .min_size(Vec2::new(w, 30.0))
+        .min_size(Vec2::new(w, 32.0))
         .frame_when_inactive(false);
     if let Some(s) = sc {
         b = b.right_text(RichText::new(s).weak().small());
@@ -134,14 +134,36 @@ fn item_full(
             },
         );
     }
-    ui.painter().text(
+    let shortcut_width = sc.map_or(0.0, |s| {
+        ui.painter()
+            .layout_no_wrap(
+                s.to_owned(),
+                egui::TextStyle::Small.resolve(ui.style()),
+                pal.text_secondary,
+            )
+            .size()
+            .x
+            + 16.0
+    });
+    crate::widgets::elided_text(
+        ui.painter(),
         egui::pos2(label_x, r.rect.center().y),
-        egui::Align2::LEFT_CENTER,
         label,
         egui::FontId::proportional(13.5),
         fg,
+        (r.rect.width() - 36.0 - shortcut_width).max(0.0),
     );
-    r
+    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, label));
+    let full_width = ui
+        .painter()
+        .layout_no_wrap(label.to_owned(), egui::FontId::proportional(13.5), fg)
+        .size()
+        .x;
+    if full_width > (r.rect.width() - 36.0 - shortcut_width).max(0.0) {
+        r.on_hover_text(label)
+    } else {
+        r
+    }
 }
 
 /// Item with a painted checkmark when `checked` — no font dependency.
@@ -188,7 +210,7 @@ fn submenu_impl<R>(
 ) {
     let w = ui.available_width();
     let btn = Button::new(RichText::new(""))
-        .min_size(Vec2::new(w, 30.0))
+        .min_size(Vec2::new(w, 32.0))
         .frame_when_inactive(false)
         .right_text(RichText::new("›").weak());
     let (r, inner) = SubMenuButton::from_button(btn).ui(ui, |sub| {
@@ -248,20 +270,10 @@ pub fn section(ui: &mut Ui, label: &str) {
 
 /// Accent-filled primary action button (dialogs).
 pub fn primary_button(ui: &mut Ui, label: &str) -> Response {
-    let accent = ui.visuals().selection.stroke.color;
-    ui.add(
-        Button::new(RichText::new(label).color(Color32::WHITE).size(14.0))
-            .fill(accent)
-            .corner_radius(CornerRadius::same(7))
-            .min_size(Vec2::new(88.0, 32.0)),
-    )
+    crate::widgets::primary_button(ui, label)
 }
 
 /// Quiet secondary button (dialogs).
 pub fn ghost_button(ui: &mut Ui, label: &str) -> Response {
-    ui.add(
-        Button::new(label)
-            .corner_radius(CornerRadius::same(7))
-            .min_size(Vec2::new(88.0, 32.0)),
-    )
+    crate::widgets::ghost_button(ui, label)
 }

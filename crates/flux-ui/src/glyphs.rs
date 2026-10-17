@@ -470,14 +470,15 @@ pub fn icon_row(
         ir,
         if selected { pal.text_primary } else { text_col },
     );
-    ui.painter().text(
+    crate::widgets::elided_text(
+        ui.painter(),
         Pos2::new(rect.left() + h * 1.1, rect.center().y),
-        egui::Align2::LEFT_CENTER,
         label,
-        egui::FontId::proportional(14.0),
+        egui::FontId::proportional(crate::theme::metrics::BODY),
         text_col,
+        (rect.width() - h * 1.1 - 10.0).max(0.0),
     );
-    resp
+    resp.on_hover_text(label)
 }
 
 /// Small filled triangle for sort headers (`up`=ascending).
@@ -520,12 +521,17 @@ pub fn icon_button(ui: &mut egui::Ui, g: Glyph, tip: &str, enabled: bool) -> egu
         resp.on_disabled_hover_text(tip)
     };
     let vis = ui.style().interact(&resp);
-    if enabled && (resp.hovered() || resp.has_focus()) {
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, tip));
+    if enabled && (resp.hovered() || resp.has_focus() || resp.is_pointer_button_down_on()) {
         ui.painter().rect(
             rect,
             vis.corner_radius,
             vis.weak_bg_fill,
-            vis.bg_stroke,
+            if resp.has_focus() {
+                Stroke::new(1.5, ui.visuals().selection.stroke.color)
+            } else {
+                Stroke::NONE
+            },
             StrokeKind::Inside,
         );
     }

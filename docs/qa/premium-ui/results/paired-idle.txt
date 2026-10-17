@@ -1,0 +1,6 @@
+{"label": "before-1", "cpu_percent_one_core": 0.0, "rss_mib": 168.33984375, "seconds": 10.00037424799666}
+{"label": "after-1", "cpu_percent_one_core": 0.0, "rss_mib": 168.453125, "seconds": 10.000384056002076}
+{"label": "before-2", "cpu_percent_one_core": 0.0, "rss_mib": 168.75390625, "seconds": 10.000206206001167}
+{"label": "after-2", "cpu_percent_one_core": 0.0, "rss_mib": 168.15234375, "seconds": 10.000260613996943}
+{"label": "before-3", "cpu_percent_one_core": 0.0, "rss_mib": 168.625, "seconds": 10.000214618004975}
+{"label": "after-3", "cpu_percent_one_core": 0.0, "rss_mib": 167.66796875, "seconds": 10.00034809600038}

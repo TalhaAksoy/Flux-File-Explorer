@@ -14,11 +14,20 @@ use crate::glyphs::{self, Glyph};
 use crate::theme::Palette;
 use crate::widgets::{self, sp};
 
-const RULES_W: f32 = 292.0;
-const ROW_H: f32 = 26.0;
+const RULES_W: f32 = 340.0;
+const ROW_H: f32 = 34.0;
+
+/// Identical geometry for painted headers and virtualized rows. Bound
+/// the comparison, not the workspace, so filenames stay close on ultrawides.
+fn comparison_columns(width: f32) -> (f32, f32, f32) {
+    let width = width.clamp(0.0, 840.0);
+    let status = 84.0_f32.min(width * 0.22);
+    let gap = 24.0_f32.min(width * 0.06);
+    ((width - status - gap).max(0.0) * 0.5, gap, width)
+}
 /// Rows beyond this stay fully readable — names truncate at the column
 /// split instead of scrolling horizontally.
-const NARROW_W: f32 = 760.0;
+const NARROW_W: f32 = 920.0;
 
 /// The workspace — called from the central panel while the active tab is
 /// `TabContent::BulkRename`.
@@ -347,8 +356,6 @@ fn preview_and_footer(app: &mut FluxApp, ui: &mut egui::Ui, pal: &Palette) {
     };
 
     let w = ui.available_width().max(0.0);
-    let counts = counts(&br.plan);
-    let rows = filtered(&br.plan, br.filter, &br.query);
     let stale = br.plan_stale;
 
     // Filter bar — segmented + live counts.
@@ -374,7 +381,7 @@ fn preview_and_footer(app: &mut FluxApp, ui: &mut egui::Ui, pal: &Palette) {
         if w >= 380.0 {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.label(
-                    egui::RichText::new(format!("{} shown", rows.len()))
+                    egui::RichText::new(format!("{} items", br.plan.len()))
                         .size(12.0)
                         .color(pal.text_muted),
                 );
@@ -383,39 +390,35 @@ fn preview_and_footer(app: &mut FluxApp, ui: &mut egui::Ui, pal: &Palette) {
     });
     ui.add_space(sp::SM);
 
+    br.preview_cache.refresh(&br.plan, br.filter, &br.query);
+    let counts = br.preview_cache.counts;
+    let rows = &br.preview_cache.rows;
+
     // Column headers — fixed proportions shared with the rows so
     // before/after always line up, never scroll horizontally.
     let header = |ui: &mut egui::Ui| {
-        ui.horizontal(|ui| {
-            let w = ui.available_width().max(0.0);
-            let status_w = 84.0;
-            let name_w = ((w - status_w - 30.0) / 2.0).max(40.0);
-            ui.allocate_ui(egui::vec2(name_w, 18.0), |ui| {
-                ui.label(
-                    egui::RichText::new("ORIGINAL")
-                        .size(10.5)
-                        .strong()
-                        .color(pal.text_muted),
-                );
-            });
-            ui.allocate_exact_size(egui::vec2(30.0, 18.0), egui::Sense::hover());
-            ui.allocate_ui(egui::vec2(name_w, 18.0), |ui| {
-                ui.label(
-                    egui::RichText::new("NEW NAME")
-                        .size(10.5)
-                        .strong()
-                        .color(pal.text_muted),
-                );
-            });
-            ui.allocate_ui(egui::vec2(status_w, 18.0), |ui| {
-                ui.label(
-                    egui::RichText::new("STATUS")
-                        .size(10.5)
-                        .strong()
-                        .color(pal.text_muted),
-                );
-            });
-        });
+        let (name_w, gap, width) = comparison_columns(ui.available_width());
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(width, 30.0), egui::Sense::hover());
+        for (label, x) in [
+            ("Original filename", rect.left() + 6.0),
+            ("New filename", rect.left() + name_w + gap),
+        ] {
+            widgets::elided_text(
+                ui.painter(),
+                egui::pos2(x, rect.center().y),
+                label,
+                egui::FontId::proportional(12.5),
+                pal.text_secondary,
+                name_w - 12.0,
+            );
+        }
+        ui.painter().text(
+            egui::pos2(rect.right() - 6.0, rect.center().y),
+            egui::Align2::RIGHT_CENTER,
+            "Status",
+            egui::FontId::proportional(12.5),
+            pal.text_secondary,
+        );
     };
     header(ui);
     ui.add_space(2.0);
@@ -430,9 +433,10 @@ fn preview_and_footer(app: &mut FluxApp, ui: &mut egui::Ui, pal: &Palette) {
     // mutate `br.filter` — consistent snapshot for header + list.
     let n = rows.len();
     // Subtract the footer height so the list never slides under it.
-    let footer_h = 52.0;
-    let list_h = (ui.available_height() - footer_h).max(80.0);
+    let footer_h = 64.0;
+    let list_h = (ui.available_height() - footer_h - ui.spacing().item_spacing.y).max(0.0);
     ui.allocate_ui(egui::vec2(w, list_h), |ui| {
+        ui.set_min_height(list_h);
         if n == 0 {
             let (title, hint) = if br.plan.is_empty() {
                 (
@@ -460,7 +464,8 @@ fn preview_and_footer(app: &mut FluxApp, ui: &mut egui::Ui, pal: &Palette) {
         }
         egui::ScrollArea::vertical()
             .id_salt("rename_rows")
-            .auto_shrink([false, true])
+            .max_height(list_h)
+            .auto_shrink([false, false])
             .show_rows(ui, ROW_H, n, |ui, range| {
                 for i in range {
                     let a = &br.plan[rows[i]];
@@ -526,9 +531,9 @@ fn preview_and_footer(app: &mut FluxApp, ui: &mut egui::Ui, pal: &Palette) {
                         .color(egui::Color32::WHITE)
                         .size(13.5),
                 )
-                .fill(pal.accent)
+                .fill(pal.accent_solid)
                 .corner_radius(egui::CornerRadius::same(7))
-                .min_size(egui::vec2(0.0, 30.0)),
+                .min_size(egui::vec2(0.0, crate::theme::metrics::CONTROL)),
             );
             if btn.clicked() {
                 if let Some(br) = app.current_tab_mut().bulk_rename_mut() {
@@ -555,9 +560,7 @@ fn preview_and_footer(app: &mut FluxApp, ui: &mut egui::Ui, pal: &Palette) {
 }
 
 fn row(ui: &mut egui::Ui, pal: &Palette, a: &flux_operations::RenameAction, stale: bool) {
-    let w = ui.available_width().max(0.0);
-    let status_w = 84.0;
-    let name_w = ((w - status_w - 30.0) / 2.0).max(40.0);
+    let (name_w, gap, w) = comparison_columns(ui.available_width());
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, ROW_H), egui::Sense::hover());
     if resp.hovered() {
         ui.painter()
@@ -576,42 +579,41 @@ fn row(ui: &mut egui::Ui, pal: &Palette, a: &flux_operations::RenameAction, stal
         .unwrap_or_default();
     let cy = rect.center().y;
     // Original — always readable start; truncated tail keeps extension-ish.
-    let mut lrect = egui::Rect::from_min_max(
+    let lrect = egui::Rect::from_min_max(
         egui::pos2(rect.left() + 6.0, rect.top()),
         egui::pos2(rect.left() + name_w, rect.bottom()),
     );
-    ui.painter().text(
+    widgets::elided_text(
+        ui.painter(),
         egui::pos2(lrect.left(), cy),
-        egui::Align2::LEFT_CENTER,
-        truncated(ui, &old_name, name_w - 12.0),
-        egui::FontId::monospace(12.5),
+        &old_name,
+        egui::FontId::proportional(14.0),
         pal.text_secondary.gamma_multiply(dim),
+        name_w - 12.0,
     );
     // Arrow between the columns.
     glyphs::paint_glyph(
         ui.painter(),
         egui::Rect::from_center_size(
-            egui::pos2(rect.left() + name_w + 15.0, cy),
+            egui::pos2(rect.left() + name_w + gap * 0.5, cy),
             egui::Vec2::splat(11.0),
         ),
         Glyph::Forward,
         pal.text_muted.gamma_multiply(dim),
     );
-    lrect = egui::Rect::from_min_max(
-        egui::pos2(rect.left() + name_w + 30.0, rect.top()),
-        egui::pos2(rect.left() + name_w + 30.0 + name_w, rect.bottom()),
-    );
+    let new_x = rect.left() + name_w + gap;
     let new_col = match &a.status {
-        RenameStatus::Ready => pal.success,
+        RenameStatus::Ready => pal.text_primary,
         RenameStatus::Unchanged => pal.text_muted,
         _ => pal.danger,
     };
-    ui.painter().text(
-        egui::pos2(lrect.left(), cy),
-        egui::Align2::LEFT_CENTER,
-        truncated(ui, &new_name, name_w - 12.0),
-        egui::FontId::monospace(12.5),
+    widgets::elided_text(
+        ui.painter(),
+        egui::pos2(new_x, cy),
+        &new_name,
+        egui::FontId::proportional(14.0),
         new_col.gamma_multiply(dim),
+        name_w - 12.0,
     );
     // Status chip on the right.
     let (label, col) = match &a.status {
@@ -625,51 +627,50 @@ fn row(ui: &mut egui::Ui, pal: &Palette, a: &flux_operations::RenameAction, stal
         egui::pos2(rect.right() - 6.0, cy),
         egui::Align2::RIGHT_CENTER,
         label,
-        egui::FontId::proportional(11.0),
+        egui::FontId::proportional(12.5),
         col.gamma_multiply(dim),
     );
-    if let RenameStatus::Invalid(msg) = &a.status {
-        resp.on_hover_text(format!("{old_name}: {msg}"));
-    }
+    let detail = match &a.status {
+        RenameStatus::Invalid(msg) => format!("{old_name}\n{new_name}\n{msg}"),
+        _ => format!("{old_name}\n→ {new_name}\n{label}"),
+    };
+    resp.on_hover_text(detail);
 }
 
-/// Single-line ellipsis truncate at pixel width — cheap version using
-/// egui's galley for a byte-boundary-safe cut.
-fn truncated(ui: &egui::Ui, s: &str, max_w: f32) -> String {
-    let fid = egui::FontId::monospace(12.5);
-    let full = ui
-        .painter()
-        .layout_no_wrap(s.to_string(), fid.clone(), egui::Color32::WHITE);
-    if full.size().x <= max_w {
-        return s.to_string();
+/// Derived preview data is rebuilt only on a new plan or filter edit,
+/// not on every scroll/hover frame. Memory is bounded by the active plan.
+#[derive(Default)]
+pub(crate) struct PreviewCache {
+    key: Option<(RenameFilter, String)>,
+    rows: Vec<usize>,
+    counts: Counts,
+}
+
+impl PreviewCache {
+    pub(crate) fn invalidate(&mut self) {
+        self.key = None;
     }
-    // Binary-search the longest prefix that fits with "…".
-    let mut lo = 0;
-    let mut hi = s.len();
-    while lo + 1 < hi {
-        let mut mid = (lo + hi) / 2;
-        while mid > lo && !s.is_char_boundary(mid) {
-            mid -= 1;
-        }
-        if mid <= lo {
-            break;
-        }
-        let t = format!("{}…", &s[..mid]);
-        if ui
-            .painter()
-            .layout_no_wrap(t, fid.clone(), egui::Color32::WHITE)
-            .size()
-            .x
-            <= max_w
+
+    fn refresh(
+        &mut self,
+        plan: &[flux_operations::RenameAction],
+        filter: RenameFilter,
+        query: &str,
+    ) {
+        if self
+            .key
+            .as_ref()
+            .is_some_and(|(f, q)| *f == filter && q == query)
         {
-            lo = mid;
-        } else {
-            hi = mid;
+            return;
         }
+        self.rows = filtered(plan, filter, query);
+        self.counts = counts(plan);
+        self.key = Some((filter, query.to_owned()));
     }
-    format!("{}…", &s[..lo])
 }
 
+#[derive(Clone, Copy, Default)]
 struct Counts {
     changed: usize,
     unchanged: usize,
@@ -723,4 +724,52 @@ fn filtered(
         })
         .map(|(i, _)| i)
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn comparison_geometry_is_bounded_and_never_negative() {
+        for width in [0.0, 80.0, 240.0, 680.0, 1024.0, 3840.0] {
+            let (name, gap, used) = comparison_columns(width);
+            assert!(name >= 0.0 && gap >= 0.0);
+            assert!(used <= width && used <= 840.0);
+            assert!(name * 2.0 + gap <= used);
+        }
+    }
+
+    #[test]
+    fn preview_cache_invalidates_for_plan_filter_and_query() {
+        let action = |status, name: &str| flux_operations::RenameAction {
+            src: Path::new(name).to_owned(),
+            dst: Path::new(&format!("new-{name}")).to_owned(),
+            status,
+        };
+        let mut plan = vec![
+            action(RenameStatus::Ready, "İstanbul.txt"),
+            action(RenameStatus::Unchanged, "notes.md"),
+        ];
+        let mut cache = PreviewCache::default();
+        cache.refresh(&plan, RenameFilter::All, "");
+        assert_eq!(cache.rows, [0, 1]);
+        assert_eq!(cache.counts.changed, 1);
+        let pointer = cache.rows.as_ptr();
+        cache.refresh(&plan, RenameFilter::All, "");
+        assert_eq!(
+            cache.rows.as_ptr(),
+            pointer,
+            "unchanged frame rebuilt indices"
+        );
+        cache.refresh(&plan, RenameFilter::Changed, "");
+        assert_eq!(cache.rows, [0]);
+        cache.refresh(&plan, RenameFilter::All, "notes");
+        assert_eq!(cache.rows, [1]);
+        plan[1].status = RenameStatus::Conflict;
+        cache.invalidate();
+        cache.refresh(&plan, RenameFilter::Issues, "");
+        assert_eq!(cache.rows, [1]);
+        assert_eq!(cache.counts.issues, 1);
+    }
 }

@@ -618,7 +618,7 @@ impl eframe::App for FluxApp {
             .inner_margin(egui::Margin::symmetric(10, 7));
         let tabs_frame = egui::Frame::default()
             .fill(theme::chrome_fill(dark))
-            .inner_margin(egui::Margin::symmetric(10, 2));
+            .inner_margin(egui::Margin::symmetric(10, 4));
         let status_frame = egui::Frame::default()
             .fill(theme::chrome_fill(dark))
             .inner_margin(egui::Margin::symmetric(10, 5));
@@ -637,15 +637,17 @@ impl eframe::App for FluxApp {
             .show(ui, |ui| {
                 chrome::tab_bar(self, ui, &mut act);
             });
-        egui::Panel::left("sidebar")
-            .resizable(true)
-            .default_size(self.settings.sidebar_width)
-            .size_range(120.0..=320.0)
-            .show_separator_line(false)
-            .frame(side_frame)
-            .show(ui, |ui| {
-                chrome::sidebar(self, ui, &mut act);
-            });
+        if self.current_dir().is_some() {
+            egui::Panel::left("sidebar")
+                .resizable(true)
+                .default_size(self.settings.sidebar_width)
+                .size_range(120.0..=320.0)
+                .show_separator_line(false)
+                .frame(side_frame)
+                .show(ui, |ui| {
+                    chrome::sidebar(self, ui, &mut act);
+                });
+        }
         egui::Panel::bottom("status")
             .show_separator_line(false)
             .frame(status_frame)
@@ -679,7 +681,7 @@ impl eframe::App for FluxApp {
             egui::Panel::right("preview")
                 .resizable(true)
                 .size_range(180.0..=520.0)
-                .default_size(280.0)
+                .default_size(320.0)
                 .show_separator_line(false)
                 .frame(prev_frame)
                 .show(ui, |ui| {
@@ -1089,8 +1091,27 @@ impl eframe::App for FluxApp {
             if self.shot.as_ref().is_some_and(|s| !s.screen_done) {
                 let which = self.shot.as_ref().unwrap().screen.clone();
                 let ok = match which.as_str() {
-                    "settings" => {
+                    "settings" | "typography" | "files" | "views" | "keys" | "advanced"
+                    | "about" => {
                         self.open_settings();
+                        if let Some(state) = self.current_tab_mut().settings_mut() {
+                            state.category = match which.as_str() {
+                                "typography" => settings_page::Category::Typography,
+                                "files" => settings_page::Category::Files,
+                                "views" => settings_page::Category::Views,
+                                "keys" => settings_page::Category::Keys,
+                                "advanced" => settings_page::Category::Advanced,
+                                "about" => settings_page::Category::About,
+                                _ => settings_page::Category::Appearance,
+                            };
+                        }
+                        true
+                    }
+                    "terminal" => {
+                        self.terminal = terminal::EmbeddedTerm::spawn(
+                            self.last_dir_path().unwrap_or_default(),
+                            &ctx,
+                        );
                         true
                     }
                     "rename" => {
@@ -1229,6 +1250,8 @@ pub fn run(start_dir: Option<PathBuf>) -> eframe::Result<()> {
             .with_inner_size(shot_size.unwrap_or([1060.0, 680.0]))
             .with_min_inner_size([560.0, 360.0]),
         renderer: eframe::Renderer::Glow,
+        // QA must neither inherit nor overwrite the user's egui panel
+        // geometry. FLUX_SETTINGS_PATH only isolates Flux preferences.
         persistence_path: std::env::var_os("FLUX_SHOT_OUT")
             .map(|out| PathBuf::from(out).with_extension("egui.ron")),
         persist_window: std::env::var_os("FLUX_SHOT_OUT").is_none(),
@@ -1259,6 +1282,12 @@ pub fn run(start_dir: Option<PathBuf>) -> eframe::Result<()> {
             }
             if std::env::var_os("FLUX_SHOT_NO_PREVIEW").is_some() {
                 app.settings.show_preview = false;
+            }
+            if let Ok(scale) = std::env::var("FLUX_SHOT_SCALE")
+                && let Ok(scale) = scale.parse::<f32>()
+                && scale.is_finite()
+            {
+                app.settings.ui_scale = scale.clamp(0.75, 2.0);
             }
             if let Ok(v) = std::env::var("FLUX_SHOT_VIEW") {
                 app.settings.view_mode = match v.as_str() {

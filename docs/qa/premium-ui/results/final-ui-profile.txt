@@ -1,0 +1,36 @@
+run=1 before
+details: median=0.159ms p95=0.184ms p99=0.364ms max=0.713ms max_shapes=221
+compact: median=0.041ms p95=0.046ms p99=0.054ms max=0.059ms max_shapes=113
+grid: median=0.062ms p95=0.067ms p99=0.076ms max=0.084ms max_shapes=259
+gallery: median=0.026ms p95=0.027ms p99=0.033ms max=0.037ms max_shapes=97
+settings: median=0.026ms p95=0.027ms p99=0.035ms max=0.040ms max_shapes=78
+run=1 after
+details: median=0.141ms p95=0.170ms p99=0.231ms max=0.444ms max_shapes=186
+compact: median=0.034ms p95=0.037ms p99=0.047ms max=0.053ms max_shapes=92
+grid: median=0.073ms p95=0.079ms p99=0.086ms max=0.104ms max_shapes=247
+gallery: median=0.032ms p95=0.037ms p99=0.044ms max=0.045ms max_shapes=97
+settings: median=0.027ms p95=0.030ms p99=0.043ms max=0.047ms max_shapes=78
+run=2 before
+details: median=0.154ms p95=0.180ms p99=0.338ms max=0.697ms max_shapes=221
+compact: median=0.038ms p95=0.040ms p99=0.041ms max=0.043ms max_shapes=113
+grid: median=0.060ms p95=0.063ms p99=0.101ms max=0.106ms max_shapes=259
+gallery: median=0.026ms p95=0.029ms p99=0.033ms max=0.051ms max_shapes=97
+settings: median=0.026ms p95=0.027ms p99=0.029ms max=0.050ms max_shapes=78
+run=2 after
+details: median=0.137ms p95=0.166ms p99=0.272ms max=0.421ms max_shapes=186
+compact: median=0.033ms p95=0.037ms p99=0.063ms max=0.072ms max_shapes=92
+grid: median=0.073ms p95=0.088ms p99=0.378ms max=0.418ms max_shapes=247
+gallery: median=0.032ms p95=0.033ms p99=0.037ms max=0.096ms max_shapes=97
+settings: median=0.027ms p95=0.028ms p99=0.033ms max=0.116ms max_shapes=78
+run=3 before
+details: median=0.155ms p95=0.207ms p99=0.474ms max=0.964ms max_shapes=221
+compact: median=0.039ms p95=0.044ms p99=0.075ms max=0.114ms max_shapes=113
+grid: median=0.061ms p95=0.068ms p99=0.125ms max=0.127ms max_shapes=259
+gallery: median=0.026ms p95=0.028ms p99=0.058ms max=0.091ms max_shapes=97
+settings: median=0.025ms p95=0.027ms p99=0.028ms max=0.089ms max_shapes=78
+run=3 after
+details: median=0.141ms p95=0.255ms p99=0.301ms max=0.446ms max_shapes=186
+compact: median=0.034ms p95=0.039ms p99=0.043ms max=0.051ms max_shapes=92
+grid: median=0.073ms p95=0.080ms p99=0.093ms max=0.102ms max_shapes=247
+gallery: median=0.032ms p95=0.050ms p99=0.060ms max=0.162ms max_shapes=97
+settings: median=0.027ms p95=0.030ms p99=0.034ms max=0.050ms max_shapes=78

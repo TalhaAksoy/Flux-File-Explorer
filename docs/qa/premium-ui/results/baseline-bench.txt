@@ -1,0 +1,75 @@
+generated 1000 entries in 6.3ms (/tmp/flux-premium-qa/data-1000)
+== flux-bench results ==
+dir:                 /tmp/flux-premium-qa/data-1000
+entries:             1000
+time to first batch: 1.1ms
+full enumeration:    1.1ms
+view compute:        1.1ms
+snapshot model mem:  76.8 KiB
+process RSS:         2.7 MiB before, 3.6 MiB after (delta 904.0 KiB)
+== flux-bench results ==
+dir:                 /tmp/flux-premium-qa/data-1000
+entries:             1000
+time to first batch: 1.1ms
+full enumeration:    1.1ms
+view compute:        1.1ms
+snapshot model mem:  76.8 KiB
+process RSS:         2.9 MiB before, 3.6 MiB after (delta 752.0 KiB)
+== flux-bench results ==
+dir:                 /tmp/flux-premium-qa/data-1000
+entries:             1000
+time to first batch: 1.1ms
+full enumeration:    1.1ms
+view compute:        2.2ms
+snapshot model mem:  76.8 KiB
+process RSS:         2.8 MiB before, 3.5 MiB after (delta 752.0 KiB)
+generated 10000 entries in 26.4ms (/tmp/flux-premium-qa/data-10000)
+== flux-bench results ==
+dir:                 /tmp/flux-premium-qa/data-10000
+entries:             10000
+time to first batch: 1.1ms
+full enumeration:    3.2ms
+view compute:        13.7ms
+snapshot model mem:  767.2 KiB
+process RSS:         2.8 MiB before, 4.7 MiB after (delta 1.9 MiB)
+== flux-bench results ==
+dir:                 /tmp/flux-premium-qa/data-10000
+entries:             10000
+time to first batch: 1.1ms
+full enumeration:    2.2ms
+view compute:        12.7ms
+snapshot model mem:  767.2 KiB
+process RSS:         3.0 MiB before, 4.9 MiB after (delta 1.9 MiB)
+== flux-bench results ==
+dir:                 /tmp/flux-premium-qa/data-10000
+entries:             10000
+time to first batch: 1.0ms
+full enumeration:    3.1ms
+view compute:        12.7ms
+snapshot model mem:  767.2 KiB
+process RSS:         2.9 MiB before, 4.8 MiB after (delta 1.8 MiB)
+generated 100000 entries in 271.0ms (/tmp/flux-premium-qa/data-100000)
+== flux-bench results ==
+dir:                 /tmp/flux-premium-qa/data-100000
+entries:             100000
+time to first batch: 1.1ms
+full enumeration:    22.5ms
+view compute:        141.9ms
+snapshot model mem:  7.5 MiB
+process RSS:         2.9 MiB before, 15.4 MiB after (delta 12.5 MiB)
+== flux-bench results ==
+dir:                 /tmp/flux-premium-qa/data-100000
+entries:             100000
+time to first batch: 1.1ms
+full enumeration:    21.3ms
+view compute:        147.1ms
+snapshot model mem:  7.5 MiB
+process RSS:         3.0 MiB before, 15.4 MiB after (delta 12.4 MiB)
+== flux-bench results ==
+dir:                 /tmp/flux-premium-qa/data-100000
+entries:             100000
+time to first batch: 1.1ms
+full enumeration:    24.3ms
+view compute:        144.2ms
+snapshot model mem:  7.5 MiB
+process RSS:         3.0 MiB before, 15.4 MiB after (delta 12.4 MiB)

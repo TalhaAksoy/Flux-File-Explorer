@@ -115,6 +115,7 @@ pub struct BulkRenameState {
     /// Preview list state — filter + filename search.
     pub filter: RenameFilter,
     pub query: String,
+    pub(crate) preview_cache: crate::rename_page::PreviewCache,
 }
 
 impl BulkRenameState {
@@ -140,6 +141,7 @@ impl BulkRenameState {
             last_edit: Instant::now(),
             filter: RenameFilter::All,
             query: String::new(),
+            preview_cache: Default::default(),
         }
     }
 
@@ -182,6 +184,7 @@ impl BulkRenameState {
                 self.plan_rx = None;
                 if generation == self.plan_gen {
                     self.plan = plan;
+                    self.preview_cache.invalidate();
                     self.plan_stale = false;
                 }
                 true
@@ -232,6 +235,7 @@ impl BulkRenameState {
     pub fn recompute(&mut self) {
         let rules = self.rules();
         self.plan = flux_operations::plan_renames(&self.sources, &rules);
+        self.preview_cache.invalidate();
         self.dirty = false;
     }
 }
@@ -385,6 +389,7 @@ pub struct FluxApp {
     pub icons: crate::icon_cache::IconCacheHandle,
     /// Per-file image thumbnails (bounded LRU worker cache).
     pub thumbs: crate::thumbs::ThumbCacheHandle,
+    pub gallery_thumbs: Option<crate::thumbs::ThumbCacheHandle>,
 
     /// In-progress internal drag: absolute paths being dragged, and the
     /// pointer position where the drag began.
@@ -761,6 +766,7 @@ impl FluxApp {
             ext_clipboard: None,
             icons,
             thumbs: std::rc::Rc::new(crate::thumbs::ThumbCache::new()),
+            gallery_thumbs: None,
             dragging: None,
             last_watch_hit: None,
             last_gc: Instant::now(),
@@ -1586,15 +1592,16 @@ impl FluxApp {
                             continue;
                         };
                         if d.gen_id == gen_id {
-                            // Final global sort on the compute thread.
+                            // Mark ready before queuing compute: finish() bumps
+                            // the snapshot version and would invalidate a fast sort.
+                            if let Ok(mut s) = d.snap.write() {
+                                s.finish();
+                            }
                             self.compute.rebuild(&d.snap, gen_id);
                             // Deferred metadata: stat entries in background.
                             self.meta_engine.fill(&d.snap, gen_id);
                             if let Some(names) = d.reselect_after_load.take() {
                                 d.pending_reselect = Some(names);
-                            }
-                            if let Ok(mut s) = d.snap.write() {
-                                s.finish();
                             }
                             // A watcher event deferred during this scan —
                             // run exactly one trailing rescan.
@@ -1632,8 +1639,9 @@ impl FluxApp {
             ctx.request_repaint();
         }
         // Metadata-fill events: sizes/dates arrive progressively — repaint to
-        // show them; on finish, rebuild the view if the sort depends on
-        // metadata so the final order is exact.
+        // show them. Completion always rebuilds: metadata version bumps
+        // can invalidate even a Name sort, and hidden/system flags can
+        // change visibility independently of the selected sort column.
         for ev in self.meta_engine.drain_events().collect::<Vec<_>>() {
             match ev {
                 MetaEvent::Batch { .. } => {
@@ -1654,12 +1662,7 @@ impl FluxApp {
                         let Some(d) = tab.dir_mut() else {
                             continue;
                         };
-                        if d.gen_id == gen_id
-                            && matches!(
-                                d.snap.read().map(|s| s.sort.key),
-                                Ok(SortKey::Size | SortKey::Modified)
-                            )
-                        {
+                        if d.gen_id == gen_id {
                             self.compute.rebuild(&d.snap, gen_id);
                         }
                     }
@@ -1819,6 +1822,13 @@ impl FluxApp {
         }
         // Thumbnail decodes finished → upload + repaint.
         if self.thumbs.pump(ctx) > 0 {
+            ctx.request_repaint();
+        }
+        if self
+            .gallery_thumbs
+            .as_ref()
+            .is_some_and(|thumbs| thumbs.pump(ctx) > 0)
+        {
             ctx.request_repaint();
         }
         // Search events.

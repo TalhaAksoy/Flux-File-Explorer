@@ -100,12 +100,14 @@ pub fn toolbar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
     // deserves bigger hit targets and text. Scoped to this Ui only.
     {
         let st = ui.style_mut();
-        st.spacing.interact_size.y = 32.0;
+        st.spacing.interact_size.y = crate::theme::metrics::CONTROL;
         st.text_styles
             .insert(egui::TextStyle::Body, egui::FontId::proportional(15.0));
         st.text_styles
             .insert(egui::TextStyle::Button, egui::FontId::proportional(14.5));
     }
+    let search_width = (ui.available_width() * 0.22).clamp(80.0, 200.0);
+    let trailing_width = search_width + 100.0;
     ui.horizontal(|ui| {
         // Click empty toolbar space to edit the path directly. Registered
         // FIRST so real widgets (nav buttons, crumbs, search) — registered
@@ -151,7 +153,7 @@ pub fn toolbar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
         if let Some(text) = &mut app.address_edit {
             let id = egui::Id::new("address_bar");
             let resp = ui.add_sized(
-                [(ui.available_width() - 320.0).max(80.0), 26.0],
+                [(ui.available_width() - trailing_width).max(40.0), 32.0],
                 egui::TextEdit::singleline(text)
                     .margin(egui::Margin::symmetric(10, 4))
                     .id(id),
@@ -181,7 +183,7 @@ pub fn toolbar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
             crumb_plate.show(ui, |ui| {
                 egui::ScrollArea::horizontal()
                     .id_salt("crumbs")
-                    .max_width((ui.available_width() - 320.0).max(60.0))
+                    .max_width((ui.available_width() - trailing_width).max(40.0))
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
                             ui.spacing_mut().item_spacing.x = 2.0;
@@ -204,7 +206,7 @@ pub fn toolbar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
                                         .size()
                                         .x
                                         + 14.0,
-                                    26.0,
+                                    32.0,
                                 );
                                 let (rect, resp) =
                                     ui.allocate_exact_size(size, egui::Sense::click());
@@ -283,7 +285,7 @@ pub fn toolbar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
             let resp = ui
                 .add_enabled_ui(on_dir, |ui| {
                     ui.add_sized(
-                        [200.0, 26.0],
+                        [search_width, 32.0],
                         egui::TextEdit::singleline(&mut app.filter_text)
                             .margin(egui::Margin::symmetric(10, 4))
                             .hint_text(if app.search_ui.active {
@@ -325,7 +327,7 @@ pub fn toolbar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
 /// Left sidebar: places, bookmarks, volumes.
 pub fn sidebar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
     // Taller rows — comfortable hit targets, the pill gets real padding.
-    ui.style_mut().spacing.interact_size.y = 32.0;
+    ui.style_mut().spacing.interact_size.y = 36.0;
     ui.add_space(6.0);
     let pal = crate::theme::Palette::of(&ui.style().visuals);
     // Highlight the row matching the active directory — `None` on
@@ -337,7 +339,12 @@ pub fn sidebar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
     };
     let section = |ui: &mut egui::Ui, label: &str| {
         ui.add_space(8.0);
-        ui.label(egui::RichText::new(label).color(pal.text_muted).size(11.0));
+        ui.label(
+            egui::RichText::new(label)
+                .color(pal.text_secondary)
+                .size(12.5)
+                .strong(),
+        );
     };
     egui::ScrollArea::vertical()
         .id_salt("sidebar")
@@ -391,8 +398,9 @@ pub fn sidebar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
             ui.add_space(8.0);
             let hdr_lbl = ui.label(
                 egui::RichText::new("Bookmarks")
-                    .color(pal.text_muted)
-                    .size(11.0),
+                    .color(pal.text_secondary)
+                    .size(12.5)
+                    .strong(),
             );
             // The header strip spans the full panel width — a small text
             // label would be a frustrating drop target otherwise.
@@ -613,119 +621,153 @@ pub fn sidebar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
 pub fn tab_bar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) {
     {
         let st = ui.style_mut();
-        st.spacing.interact_size.y = 26.0;
+        st.spacing.interact_size.y = crate::theme::metrics::TAB;
     }
     let pal = crate::theme::Palette::of(&ui.style().visuals);
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 4.0;
         let n = app.tabs.len();
         let mut close_idx = None;
-        for i in 0..n {
-            let title = app.tabs[i].title();
-            let glyph = app.tabs[i].glyph();
-            let selected = i == app.active;
-            let loading = app.tabs[i].loading();
-            let label = if loading {
-                format!("… {title}")
-            } else {
-                title
-            };
-            // Measure the label; leading glyph + close × flank the text.
-            let text_w = ui
-                .painter()
-                .layout_no_wrap(
-                    label.clone(),
-                    egui::FontId::proportional(13.0),
-                    pal.text_primary,
-                )
-                .size()
-                .x;
-            let show_x = true; // every tab is closable — last one reopens Home
-            let w = text_w + 36.0 + if show_x { 14.0 } else { 0.0 };
-            let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, 26.0), egui::Sense::click());
-            let fill = if selected {
-                pal.bg_elevated
-            } else if resp.hovered() {
-                pal.surface_hover
-            } else {
-                egui::Color32::TRANSPARENT
-            };
-            if fill != egui::Color32::TRANSPARENT {
-                ui.painter()
-                    .rect_filled(rect, egui::CornerRadius::same(7), fill);
-            }
-            // Workspace glyph: folder / gear / pencil at the pill's left.
-            let gr = egui::Rect::from_center_size(
-                egui::pos2(rect.left() + 16.0, rect.center().y),
-                egui::Vec2::splat(12.0),
-            );
-            glyphs::paint_glyph(
-                ui.painter(),
-                gr,
-                glyph,
-                if selected {
-                    pal.text_primary
-                } else {
-                    pal.text_secondary
-                },
-            );
-            ui.painter().text(
-                egui::pos2(rect.left() + 25.0, rect.center().y),
-                egui::Align2::LEFT_CENTER,
-                &label,
-                egui::FontId::proportional(13.0),
-                if selected {
-                    pal.text_primary
-                } else {
-                    pal.text_secondary
-                },
-            );
-            // × close — active tab always, others on hover.
-            if show_x {
-                let xr = egui::Rect::from_center_size(
-                    egui::pos2(rect.right() - 13.0, rect.center().y),
-                    egui::Vec2::splat(14.0),
-                );
-                let xresp = ui.interact(xr, egui::Id::new("tabx").with(i), egui::Sense::click());
-                let xcol = if xresp.hovered() {
-                    pal.text_primary
-                } else {
-                    pal.text_muted
-                };
-                if selected || xresp.hovered() || resp.hovered() {
-                    glyphs::paint_glyph(ui.painter(), xr.shrink(3.0), glyphs::Glyph::Close, xcol);
-                }
-                if xresp.clicked() {
-                    close_idx = Some(i);
-                }
-            }
-            if resp.middle_clicked() {
-                close_idx = Some(i);
-            }
-            if resp.clicked() {
-                act.activate_tab = Some(i);
-            }
-            resp.context_menu(|ui| {
-                crate::menu::begin(ui, 180.0);
-                // Duplicate only makes sense for directories — and must
-                // clone THIS tab's path, not the active tab's.
-                let dup_path = app
-                    .tabs
-                    .get(i)
-                    .and_then(|t| t.dir())
-                    .map(|d| d.snap.read().unwrap().path.clone());
-                if let Some(p) = dup_path
-                    && crate::menu::item_icon(ui, glyphs::Glyph::Copy, "Duplicate Tab").clicked()
-                {
-                    act.new_tab_at = Some(p);
-                    ui.close();
-                }
-                if crate::menu::item_icon(ui, glyphs::Glyph::Close, "Close").clicked() {
-                    close_idx = Some(i);
-                    ui.close();
-                }
+        egui::ScrollArea::horizontal()
+            .id_salt("workspace_tabs")
+            .max_width((ui.available_width() - 40.0).max(0.0))
+            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    for i in 0..n {
+                        let title = app.tabs[i].title();
+                        let glyph = app.tabs[i].glyph();
+                        let selected = i == app.active;
+                        let loading = app.tabs[i].loading();
+                        let label = if loading {
+                            format!("… {title}")
+                        } else {
+                            title
+                        };
+                        // Measure the label; leading glyph + close × flank the text.
+                        let text_w = ui
+                            .painter()
+                            .layout_no_wrap(
+                                label.clone(),
+                                egui::FontId::proportional(13.0),
+                                pal.text_primary,
+                            )
+                            .size()
+                            .x;
+                        let show_x = true; // every tab is closable — last one reopens Home
+                        let w = (text_w + 68.0).clamp(120.0, 220.0);
+                        let (rect, resp) = ui.allocate_exact_size(
+                            egui::vec2(w, crate::theme::metrics::TAB),
+                            egui::Sense::click(),
+                        );
+                        let resp = resp.on_hover_text(&label);
+                        if selected
+                            && app.active
+                                != ui
+                                    .data(|d| d.get_temp::<usize>(egui::Id::new("visible_tab")))
+                                    .unwrap_or(usize::MAX)
+                        {
+                            resp.scroll_to_me(Some(egui::Align::Center));
+                            ui.data_mut(|d| {
+                                d.insert_temp(egui::Id::new("visible_tab"), app.active)
+                            });
+                        }
+                        let fill = if selected {
+                            pal.bg_elevated
+                        } else if resp.hovered() {
+                            pal.surface_hover
+                        } else {
+                            egui::Color32::TRANSPARENT
+                        };
+                        if fill != egui::Color32::TRANSPARENT {
+                            ui.painter()
+                                .rect_filled(rect, egui::CornerRadius::same(7), fill);
+                        }
+                        // Workspace glyph: folder / gear / pencil at the pill's left.
+                        let gr = egui::Rect::from_center_size(
+                            egui::pos2(rect.left() + 16.0, rect.center().y),
+                            egui::Vec2::splat(12.0),
+                        );
+                        glyphs::paint_glyph(
+                            ui.painter(),
+                            gr,
+                            glyph,
+                            if selected {
+                                pal.text_primary
+                            } else {
+                                pal.text_secondary
+                            },
+                        );
+                        crate::widgets::elided_text(
+                            ui.painter(),
+                            egui::pos2(rect.left() + 29.0, rect.center().y),
+                            &label,
+                            egui::FontId::proportional(13.5),
+                            if selected {
+                                pal.text_primary
+                            } else {
+                                pal.text_secondary
+                            },
+                            w - 58.0,
+                        );
+                        // × close — active tab always, others on hover.
+                        if show_x {
+                            let xr = egui::Rect::from_center_size(
+                                egui::pos2(rect.right() - 13.0, rect.center().y),
+                                egui::Vec2::splat(14.0),
+                            );
+                            let xresp = ui.interact(
+                                xr,
+                                egui::Id::new("tabx").with(i),
+                                egui::Sense::click(),
+                            );
+                            let xcol = if xresp.hovered() {
+                                pal.text_primary
+                            } else {
+                                pal.text_muted
+                            };
+                            if selected || xresp.hovered() || resp.hovered() {
+                                glyphs::paint_glyph(
+                                    ui.painter(),
+                                    xr.shrink(3.0),
+                                    glyphs::Glyph::Close,
+                                    xcol,
+                                );
+                            }
+                            if xresp.clicked() {
+                                close_idx = Some(i);
+                            }
+                        }
+                        if resp.middle_clicked() {
+                            close_idx = Some(i);
+                        }
+                        if resp.clicked() {
+                            act.activate_tab = Some(i);
+                        }
+                        resp.context_menu(|ui| {
+                            crate::menu::begin(ui, 180.0);
+                            // Duplicate only makes sense for directories — and must
+                            // clone THIS tab's path, not the active tab's.
+                            let dup_path = app
+                                .tabs
+                                .get(i)
+                                .and_then(|t| t.dir())
+                                .map(|d| d.snap.read().unwrap().path.clone());
+                            if let Some(p) = dup_path
+                                && crate::menu::item_icon(ui, glyphs::Glyph::Copy, "Duplicate Tab")
+                                    .clicked()
+                            {
+                                act.new_tab_at = Some(p);
+                                ui.close();
+                            }
+                            if crate::menu::item_icon(ui, glyphs::Glyph::Close, "Close").clicked() {
+                                close_idx = Some(i);
+                                ui.close();
+                            }
+                        });
+                    }
+                });
             });
-        }
         if let Some(i) = close_idx {
             act.close_tab = Some(i);
         }
@@ -772,7 +814,7 @@ pub fn status_bar(app: &mut FluxApp, ui: &mut egui::Ui, act: &mut ChromeAction) 
 
     let pal = crate::theme::Palette::of(&ui.style().visuals);
     let quiet = |ui: &mut egui::Ui, s: String| {
-        ui.label(egui::RichText::new(s).color(pal.text_secondary).size(11.5));
+        ui.label(egui::RichText::new(s).color(pal.text_secondary).size(12.5));
     };
     let dot = |ui: &mut egui::Ui| {
         ui.label(egui::RichText::new("·").color(pal.text_muted));

@@ -11,7 +11,7 @@ use egui::{
     Stroke, StrokeKind, Ui, Vec2,
 };
 
-use crate::theme::Palette;
+use crate::theme::{Palette, metrics};
 
 /// Spacing scale (logical px): micro / compact / related / normal / section / major.
 pub mod sp {
@@ -23,7 +23,7 @@ pub mod sp {
     pub const XXL: f32 = 32.0;
 }
 
-const BTN_H: f32 = 30.0;
+const BTN_H: f32 = metrics::CONTROL;
 const BTN_RADIUS: u8 = 7;
 
 fn sized(btn: Button<'_>, min_w: f32) -> Button<'_> {
@@ -33,7 +33,7 @@ fn sized(btn: Button<'_>, min_w: f32) -> Button<'_> {
 
 /// Accent-filled primary action — the single obvious choice in a dialog.
 pub fn primary_button(ui: &mut Ui, label: &str) -> Response {
-    let accent = ui.visuals().selection.stroke.color;
+    let accent = Palette::of(ui.visuals()).accent_solid;
     ui.add(sized(
         Button::new(RichText::new(label).color(Color32::WHITE).size(13.5)).fill(accent),
         88.0,
@@ -73,9 +73,20 @@ pub fn switch(ui: &mut Ui, id: &'static str, on: &mut bool) -> Response {
     let pal = Palette::of(&ui.style().visuals);
     let (_, rect) = ui.allocate_space(Vec2::new(36.0, 20.0));
     let mut resp = ui.interact(rect, ui.id().with(("switch", id)), Sense::click());
-    if resp.clicked() {
+    resp.widget_info(|| {
+        egui::WidgetInfo::selected(egui::WidgetType::Checkbox, ui.is_enabled(), *on, id)
+    });
+    if resp.clicked() && ui.is_enabled() {
         *on = !*on;
         resp.mark_changed();
+    }
+    if resp.has_focus() {
+        ui.painter().rect_stroke(
+            rect.expand(3.0),
+            CornerRadius::same(12),
+            Stroke::new(1.5, pal.accent),
+            StrokeKind::Outside,
+        );
     }
     let anim = ui
         .ctx()
@@ -112,13 +123,22 @@ pub fn setting_row(
     desc: Option<&str>,
     add_control: impl FnOnce(&mut Ui),
 ) {
-    let narrow = ui.available_width() < 520.0;
+    ui.add_space(sp::SM);
+    let narrow = ui.available_width() < 620.0;
     if narrow {
         ui.vertical(|ui| {
             ui.spacing_mut().item_spacing.y = sp::XS;
-            ui.label(RichText::new(title).color(pal.text_primary).size(13.5));
+            ui.label(
+                RichText::new(title)
+                    .color(pal.text_primary)
+                    .size(metrics::BODY),
+            );
             if let Some(d) = desc {
-                ui.label(RichText::new(d).color(pal.text_muted).size(11.5));
+                ui.label(
+                    RichText::new(d)
+                        .color(pal.text_secondary)
+                        .size(metrics::SECONDARY),
+                );
             }
             ui.add_space(2.0);
             add_control(ui);
@@ -130,9 +150,17 @@ pub fn setting_row(
                 egui::Layout::top_down(egui::Align::Min),
                 |ui| {
                     ui.spacing_mut().item_spacing.y = 2.0;
-                    ui.label(RichText::new(title).color(pal.text_primary).size(13.5));
+                    ui.label(
+                        RichText::new(title)
+                            .color(pal.text_primary)
+                            .size(metrics::BODY),
+                    );
                     if let Some(d) = desc {
-                        ui.label(RichText::new(d).color(pal.text_muted).size(11.5));
+                        ui.label(
+                            RichText::new(d)
+                                .color(pal.text_secondary)
+                                .size(metrics::SECONDARY),
+                        );
                     }
                 },
             );
@@ -150,12 +178,16 @@ pub fn section_heading(ui: &mut Ui, pal: &Palette, title: &str, desc: Option<&st
     ui.label(
         RichText::new(title)
             .color(pal.text_primary)
-            .size(15.0)
+            .size(metrics::SECTION)
             .strong(),
     );
     if let Some(d) = desc {
         ui.add_space(2.0);
-        ui.label(RichText::new(d).color(pal.text_secondary).size(12.0));
+        ui.label(
+            RichText::new(d)
+                .color(pal.text_secondary)
+                .size(metrics::SECONDARY),
+        );
     }
     ui.add_space(sp::SM);
 }
@@ -189,7 +221,7 @@ pub fn segmented<T: PartialEq + Copy>(
     current: T,
 ) -> Option<T> {
     let mut picked = None;
-    let h = 28.0;
+    let h = metrics::SEGMENT;
     let pad = 3.0;
     let widths: Vec<f32> = options
         .iter()
@@ -217,6 +249,14 @@ pub fn segmented<T: PartialEq + Copy>(
         );
         let resp = ui.interact(cell, ui.id().with(("seg", id, i)), Sense::click());
         let on = *val == current;
+        resp.widget_info(|| {
+            egui::WidgetInfo::selected(
+                egui::WidgetType::SelectableLabel,
+                ui.is_enabled(),
+                on,
+                *label,
+            )
+        });
         if on {
             ui.painter().rect(
                 cell,
@@ -240,7 +280,15 @@ pub fn segmented<T: PartialEq + Copy>(
                 pal.text_secondary
             },
         );
-        if resp.clicked() {
+        if resp.has_focus() {
+            ui.painter().rect_stroke(
+                cell,
+                CornerRadius::same(6),
+                Stroke::new(1.5, pal.accent),
+                StrokeKind::Inside,
+            );
+        }
+        if resp.clicked() && ui.is_enabled() {
             picked = Some(*val);
         }
         x += widths[i] + 2.0;
@@ -287,6 +335,24 @@ pub fn text_field(ui: &mut Ui, text: &mut String, hint: &str, width: f32) -> Res
 }
 
 /// Small status pill: colored dot + label. `kind`: "ok" | "warn" | "err" | "info".
+/// Paint single-line text within a strict width, with Unicode-safe ellipsis.
+/// Uses egui's text layout rather than repeatedly measuring every prefix.
+pub fn elided_text(
+    painter: &egui::Painter,
+    pos: Pos2,
+    text: &str,
+    font: egui::FontId,
+    color: Color32,
+    width: f32,
+) {
+    let mut job = egui::text::LayoutJob::simple(text.to_owned(), font, color, width.max(0.0));
+    job.wrap.max_rows = 1;
+    job.wrap.break_anywhere = true;
+    let galley = painter.layout_job(job);
+    let y = pos.y - galley.size().y * 0.5;
+    painter.galley(Pos2::new(pos.x, y), galley, color);
+}
+
 pub fn status_chip(ui: &mut Ui, pal: &Palette, kind: &str, label: &str) {
     let col = match kind {
         "ok" => pal.success,

@@ -1,0 +1,129 @@
+    Blocking waiting for file lock on artifact directory
+   Compiling libc v0.2.190
+   Compiling bitflags v2.13.2
+   Compiling serde_core v1.0.229
+   Compiling log v0.4.34
+   Compiling crossbeam-utils v0.8.23
+   Compiling crossbeam-epoch v0.9.21
+   Compiling zerocopy v0.8.63
+   Compiling serde v1.0.229
+   Compiling syn v3.0.9
+   Compiling crossbeam-deque v0.8.8
+   Compiling regex-automata v0.4.18
+   Compiling zerocopy-derive v0.8.63
+   Compiling hashbrown v0.17.1
+   Compiling simd-adler32 v0.3.10
+   Compiling rayon-core v1.13.0
+   Compiling zlib-rs v0.6.8
+   Compiling tracing v0.1.44
+   Compiling alloca v0.4.0
+   Compiling anstyle v1.0.14
+   Compiling clap_lex v1.1.1
+   Compiling plotters-backend v0.3.7
+   Compiling rustix v1.1.5
+   Compiling ciborium-io v0.2.2
+   Compiling itertools v0.13.0
+   Compiling notify-types v2.1.0
+   Compiling linux-raw-sys v0.12.1
+   Compiling zopfli v0.8.4
+   Compiling clap_builder v4.6.7
+   Compiling cast v0.3.0
+   Compiling oorandom v11.1.5
+   Compiling anes v0.1.6
+   Compiling plotters-svg v0.3.7
+   Compiling plotters v0.3.7
+   Compiling indexmap v2.14.2
+   Compiling inotify-sys v0.1.8
+   Compiling dirs-sys v0.5.0
+   Compiling mio v1.2.4
+   Compiling trash v5.2.9
+   Compiling fs2 v0.4.3
+   Compiling filetime v0.2.29
+   Compiling getrandom v0.4.3
+   Compiling page_size v0.6.0
+   Compiling inotify v0.11.5
+   Compiling directories v6.0.0
+   Compiling rayon v1.12.0
+   Compiling criterion-plot v0.8.2
+   Compiling notify v8.2.0
+   Compiling serde_derive v1.0.229
+   Compiling tempfile v3.27.0
+   Compiling flux-platform v0.1.0 (/home/alha/Project/Rust/Flux-File-Explorer/crates/flux-platform)
+   Compiling clap v4.6.7
+   Compiling flate2 v1.1.10
+   Compiling serde_json v1.0.154
+   Compiling regex v1.13.1
+   Compiling zip v9.0.3
+   Compiling tinytemplate v1.2.1
+   Compiling half v2.7.1
+   Compiling ciborium-ll v0.2.2
+   Compiling ciborium v0.2.2
+   Compiling flux-operations v0.1.0 (/home/alha/Project/Rust/Flux-File-Explorer/crates/flux-operations)
+   Compiling criterion v0.8.2
+   Compiling flux-bench v0.1.0 (/home/alha/Project/Rust/Flux-File-Explorer/crates/flux-bench)
+    Finished `bench` profile [optimized] target(s) in 41.23s
+     Running unittests src/main.rs (target/release/deps/flux_bench-2989b714b461dea2)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running benches/core_benches.rs (target/release/deps/core_benches-3eba81da3fcfecb7)
+Gnuplot not found, using plotters backend
+Benchmarking build_view/10000
+Benchmarking build_view/10000: Warming up for 3.0000 s
+Benchmarking build_view/10000: Collecting 100 samples in estimated 5.8004 s (600 iterations)
+Benchmarking build_view/10000: Analyzing
+build_view/10000        time:   [9.6616 ms 9.6803 ms 9.6989 ms]
+Found 4 outliers among 100 measurements (4.00%)
+  3 (3.00%) low mild
+  1 (1.00%) high mild
+Benchmarking build_view/100000
+Benchmarking build_view/100000: Warming up for 3.0000 s
+
+Warning: Unable to complete 100 samples in 5.0s. You may wish to increase target time to 12.8s, or reduce sample count to 30.
+Benchmarking build_view/100000: Collecting 100 samples in estimated 12.831 s (100 iterations)
+Benchmarking build_view/100000: Analyzing
+build_view/100000       time:   [130.57 ms 132.63 ms 135.17 ms]
+Found 15 outliers among 100 measurements (15.00%)
+  8 (8.00%) high mild
+  7 (7.00%) high severe
+
+Benchmarking name_cmp pair
+Benchmarking name_cmp pair: Warming up for 3.0000 s
+Benchmarking name_cmp pair: Collecting 100 samples in estimated 5.0000 s (133M iterations)
+Benchmarking name_cmp pair: Analyzing
+name_cmp pair           time:   [37.853 ns 37.967 ns 38.089 ns]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+
+Benchmarking entry_clone/10000
+Benchmarking entry_clone/10000: Warming up for 3.0000 s
+Benchmarking entry_clone/10000: Collecting 100 samples in estimated 5.6694 s (20k iterations)
+Benchmarking entry_clone/10000: Analyzing
+entry_clone/10000       time:   [302.34 µs 304.89 µs 307.65 µs]
+Benchmarking entry_clone/100000
+Benchmarking entry_clone/100000: Warming up for 3.0000 s
+Benchmarking entry_clone/100000: Collecting 100 samples in estimated 5.0736 s (1800 iterations)
+Benchmarking entry_clone/100000: Analyzing
+entry_clone/100000      time:   [3.0228 ms 3.0395 ms 3.0560 ms]
+
+Benchmarking enumerate/2000
+Benchmarking enumerate/2000: Warming up for 3.0000 s
+Benchmarking enumerate/2000: Collecting 100 samples in estimated 5.4393 s (15k iterations)
+Benchmarking enumerate/2000: Analyzing
+enumerate/2000          time:   [351.24 µs 352.42 µs 353.69 µs]
+Found 3 outliers among 100 measurements (3.00%)
+  2 (2.00%) high mild
+  1 (1.00%) high severe
+Benchmarking enumerate/10000
+Benchmarking enumerate/10000: Warming up for 3.0000 s
+
+Warning: Unable to complete 100 samples in 5.0s. You may wish to increase target time to 9.2s, enable flat sampling, or reduce sample count to 50.
+Benchmarking enumerate/10000: Collecting 100 samples in estimated 9.1868 s (5050 iterations)
+Benchmarking enumerate/10000: Analyzing
+enumerate/10000         time:   [1.7243 ms 1.7405 ms 1.7583 ms]
+Found 4 outliers among 100 measurements (4.00%)
+  1 (1.00%) high mild
+  3 (3.00%) high severe
+
