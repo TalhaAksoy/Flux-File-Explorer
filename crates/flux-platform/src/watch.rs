@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-use notify::event::{AccessKind, AccessMode};
+use notify::event::{AccessKind, AccessMode, ModifyKind};
 use notify::{EventKind, RecursiveMode, Watcher};
 
 /// One debounced "something changed under this path" signal.
@@ -17,11 +17,16 @@ pub struct WatchEvent {
 
 /// Shared `Option<callback>` the notify thread invokes on each raw event.
 type WakeSlot = std::sync::Arc<std::sync::Mutex<Option<Box<dyn Fn() + Send + Sync>>>>;
+/// Watched path shared with the notify callback so metadata-only events
+/// on the directory itself can be recognised and dropped.
+type WatchSlot = std::sync::Arc<std::sync::Mutex<Option<PathBuf>>>;
 
 pub struct FsWatcher {
     watcher: Option<notify::RecommendedWatcher>,
     rx: mpsc::Receiver<PathBuf>,
     watching: Option<PathBuf>,
+    /// Mirror of `watching` readable from the notify thread.
+    watching_shared: WatchSlot,
     /// First undelivered change; delivered once the debounce window passes.
     pending_since: Option<Instant>,
     /// Wakes the UI when a raw event lands (e.g. `ctx.request_repaint`).
@@ -56,14 +61,24 @@ impl FsWatcher {
         let (tx, rx) = mpsc::channel::<PathBuf>();
         let wake = WakeSlot::default();
         let wake2 = wake.clone();
+        let watching_shared = WatchSlot::default();
+        let watching_cb = watching_shared.clone();
         let watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
             if let Ok(ev) = res
                 && is_content_change(&ev.kind)
                 && let Some(p) = ev.paths.first()
             {
-                let _ = tx.send(p.clone());
-                if let Some(w) = wake2.lock().unwrap().as_ref() {
-                    w();
+                // Metadata-only events on the watched directory itself are
+                // scan noise, not content — macOS FSEvents emits
+                // ItemInodeMetaMod for the dir's atime on every `read_dir`.
+                // Child-path metadata events still count as real changes.
+                let own_meta = matches!(ev.kind, EventKind::Modify(ModifyKind::Metadata(_)))
+                    && watching_cb.lock().unwrap().as_deref() == Some(p.as_path());
+                if !own_meta {
+                    let _ = tx.send(p.clone());
+                    if let Some(w) = wake2.lock().unwrap().as_ref() {
+                        w();
+                    }
                 }
             }
         });
@@ -71,6 +86,7 @@ impl FsWatcher {
             watcher: watcher.ok(),
             rx,
             watching: None,
+            watching_shared,
             pending_since: None,
             wake,
         }
@@ -103,12 +119,15 @@ impl FsWatcher {
         if let Some(w) = self.watcher.as_mut()
             && w.watch(dir, RecursiveMode::NonRecursive).is_ok()
         {
-            self.watching = Some(dir.to_path_buf());
+            let p = dir.to_path_buf();
+            *self.watching_shared.lock().unwrap() = Some(p.clone());
+            self.watching = Some(p);
         }
     }
 
     pub fn unwatch(&mut self) {
         if let (Some(w), Some(p)) = (self.watcher.as_mut(), self.watching.take()) {
+            *self.watching_shared.lock().unwrap() = None;
             let _ = w.unwatch(&p);
         }
     }
