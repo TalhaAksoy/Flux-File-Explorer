@@ -1278,6 +1278,17 @@ pub fn run(start_dir: Option<PathBuf>) -> eframe::Result<()> {
                 };
                 app.dark = t != "light";
             }
+            if std::env::var_os("FLUX_SHOT_NO_PREVIEW").is_some() {
+                app.settings.show_preview = false;
+            }
+            if let Ok(v) = std::env::var("FLUX_SHOT_VIEW") {
+                app.settings.view_mode = match v.as_str() {
+                    "grid" => flux_settings::ViewMode::Grid,
+                    "gallery" => flux_settings::ViewMode::Gallery,
+                    "compact" => flux_settings::ViewMode::Compact,
+                    _ => flux_settings::ViewMode::List,
+                };
+            }
             cc.egui_ctx.set_fonts(theme::load_fonts(
                 &app.settings.ui_font,
                 &app.settings.mono_font,
