@@ -8,6 +8,7 @@ pub mod compute;
 pub mod dirsize;
 pub mod entry;
 pub mod enumerate;
+pub mod file_type;
 pub mod snapshot;
 pub mod sort;
 

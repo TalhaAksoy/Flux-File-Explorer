@@ -3,7 +3,7 @@
 //! applies immediately and persists via the debounced settings writer;
 //! the page never blocks on the filesystem (font lists are cached).
 
-use flux_settings::{Settings, Theme, ViewMode};
+use flux_settings::{IconSource, Settings, Theme, ViewMode};
 
 use crate::app::FluxApp;
 use crate::glyphs::{self, Glyph};
@@ -78,6 +78,7 @@ impl Category {
 /// One searchable setting — `render` maps an id to its live control.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum SettingId {
+    IconSource,
     Theme,
     UiScale,
     UiFont,
@@ -102,6 +103,12 @@ struct SettingMeta {
 }
 
 const REGISTRY: &[SettingMeta] = &[
+    SettingMeta {
+        id: SettingId::IconSource,
+        cat: Category::Appearance,
+        title: "File icons",
+        keywords: "icons source system native flux automatic",
+    },
     SettingMeta {
         id: SettingId::Theme,
         cat: Category::Appearance,
@@ -460,6 +467,7 @@ fn setting_row(
     id: SettingId,
 ) {
     match id {
+        SettingId::IconSource => icon_source_row(app, ui, pal),
         SettingId::Theme => theme_row(app, ui, ctx, pal),
         SettingId::UiScale => scale_row(app, ui, ctx, pal),
         SettingId::UiFont => widgets::setting_row(
@@ -706,6 +714,34 @@ fn appearance(app: &mut FluxApp, ui: &mut egui::Ui, ctx: &egui::Context, pal: &P
                 cur,
             ) {
                 app.density = v;
+                app.settings_dirty_at = Some(std::time::Instant::now());
+            }
+        },
+    );
+    widgets::row_divider(ui, pal);
+    icon_source_row(app, ui, pal);
+}
+
+fn icon_source_row(app: &mut FluxApp, ui: &mut egui::Ui, pal: &Palette) {
+    widgets::setting_row(
+        ui,
+        pal,
+        "File icons",
+        Some("Automatic keeps application artwork; System falls back to Flux when unavailable."),
+        |ui| {
+            if let Some(source) = widgets::segmented(
+                ui,
+                pal,
+                "settings.icon_source",
+                &[
+                    (IconSource::Flux, "Flux"),
+                    (IconSource::System, "System"),
+                    (IconSource::Automatic, "Automatic"),
+                ],
+                app.settings.icon_source,
+            ) {
+                app.settings.icon_source = source;
+                app.icons.set_source(source);
                 app.settings_dirty_at = Some(std::time::Instant::now());
             }
         },

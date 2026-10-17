@@ -780,7 +780,10 @@ fn gather(path: &Path) -> (Preview, Option<PreviewMeta>) {
         } else if is_dir {
             "Folder".to_string()
         } else {
-            flux_platform::type_label(path.extension().and_then(|e| e.to_str())).to_string()
+            flux_core::file_type::resolve(flux_core::EntryKind::File, path)
+                .info()
+                .label
+                .to_string()
         },
         mime: (!md.is_dir() && !is_symlink)
             .then(|| mime_guess::from_path(path).first_raw())
@@ -984,7 +987,19 @@ fn metadata_sections(app: &mut FluxApp, ui: &mut egui::Ui, path: &Path) {
 
     // ── General ──
     section(ui, &pal, "General");
-    meta_row(ui, &pal, "Type", &meta.kind);
+    let kind = if meta.is_symlink {
+        flux_core::EntryKind::Symlink
+    } else if meta.is_dir {
+        flux_core::EntryKind::Dir
+    } else {
+        flux_core::EntryKind::File
+    };
+    meta_row(
+        ui,
+        &pal,
+        "Type",
+        app.icons.file_type(kind, path).info().label,
+    );
     if let Some(mime) = &meta.mime {
         meta_row(ui, &pal, "MIME type", mime);
     }
@@ -1280,12 +1295,29 @@ pub fn panel(app: &mut FluxApp, ui: &mut egui::Ui) {
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| path.display().to_string());
     ui.add_space(4.0);
-    ui.label(
-        egui::RichText::new(&name)
-            .color(pal.text_primary)
-            .size(14.0)
-            .strong(),
-    );
+    ui.horizontal_wrapped(|ui| {
+        let kind = app
+            .preview_meta
+            .as_ref()
+            .map(|m| {
+                if m.is_symlink {
+                    flux_core::EntryKind::Symlink
+                } else if m.is_dir {
+                    flux_core::EntryKind::Dir
+                } else {
+                    flux_core::EntryKind::File
+                }
+            })
+            .unwrap_or(flux_core::EntryKind::File);
+        let (rect, _) = ui.allocate_exact_size(egui::Vec2::splat(28.0), egui::Sense::hover());
+        app.icons.paint(ui.painter(), rect, kind, &path, &pal);
+        ui.label(
+            egui::RichText::new(&name)
+                .color(pal.text_primary)
+                .size(14.0)
+                .strong(),
+        );
+    });
     ui.add_space(8.0);
 
     // Preview leads (Finder Quick Look order); metadata sits below it.
