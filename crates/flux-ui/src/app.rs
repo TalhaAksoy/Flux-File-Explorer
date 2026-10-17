@@ -115,6 +115,7 @@ pub struct BulkRenameState {
     /// Preview list state — filter + filename search.
     pub filter: RenameFilter,
     pub query: String,
+    pub(crate) preview_cache: crate::rename_page::PreviewCache,
 }
 
 impl BulkRenameState {
@@ -140,6 +141,7 @@ impl BulkRenameState {
             last_edit: Instant::now(),
             filter: RenameFilter::All,
             query: String::new(),
+            preview_cache: Default::default(),
         }
     }
 
@@ -182,6 +184,7 @@ impl BulkRenameState {
                 self.plan_rx = None;
                 if generation == self.plan_gen {
                     self.plan = plan;
+                    self.preview_cache.invalidate();
                     self.plan_stale = false;
                 }
                 true
@@ -232,6 +235,7 @@ impl BulkRenameState {
     pub fn recompute(&mut self) {
         let rules = self.rules();
         self.plan = flux_operations::plan_renames(&self.sources, &rules);
+        self.preview_cache.invalidate();
         self.dirty = false;
     }
 }
@@ -385,6 +389,7 @@ pub struct FluxApp {
     pub icons: crate::icon_cache::IconCacheHandle,
     /// Per-file image thumbnails (bounded LRU worker cache).
     pub thumbs: crate::thumbs::ThumbCacheHandle,
+    pub gallery_thumbs: Option<crate::thumbs::ThumbCacheHandle>,
 
     /// In-progress internal drag: absolute paths being dragged, and the
     /// pointer position where the drag began.
@@ -759,6 +764,7 @@ impl FluxApp {
             ext_clipboard: None,
             icons: std::rc::Rc::new(crate::icon_cache::IconCache::new()),
             thumbs: std::rc::Rc::new(crate::thumbs::ThumbCache::new()),
+            gallery_thumbs: None,
             dragging: None,
             last_watch_hit: None,
             last_gc: Instant::now(),
@@ -1813,6 +1819,13 @@ impl FluxApp {
         }
         // Thumbnail decodes finished → upload + repaint.
         if self.thumbs.pump(ctx) > 0 {
+            ctx.request_repaint();
+        }
+        if self
+            .gallery_thumbs
+            .as_ref()
+            .is_some_and(|thumbs| thumbs.pump(ctx) > 0)
+        {
             ctx.request_repaint();
         }
         // Search events.

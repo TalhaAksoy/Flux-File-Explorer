@@ -619,10 +619,20 @@ fn icon_grid(app: &mut FluxApp, ui: &mut egui::Ui, pal: &Palette, cell_w: f32) -
         .current_dir_mut()
         .and_then(|d| d.scroll_to_row.take())
         .map(|r| r / cols);
+    let thumbs = if gallery {
+        app.gallery_thumbs
+            .get_or_insert_with(|| {
+                let cache = std::rc::Rc::new(crate::thumbs::ThumbCache::new_gallery());
+                cache.set_ctx(ui.ctx().clone());
+                cache
+            })
+            .clone()
+    } else {
+        app.thumbs.clone()
+    };
     let sel = app.current_dir().map(|d| &d.sel);
     let egui_ctx = ui.ctx().clone();
     let icons = app.icons.clone();
-    let thumbs = app.thumbs.clone();
     let drag_active = app.dragging.is_some();
     let visuals = egui_ctx.style_of(egui_ctx.theme()).visuals.clone();
 
@@ -695,8 +705,11 @@ fn icon_grid(app: &mut FluxApp, ui: &mut egui::Ui, pal: &Palette, cell_w: f32) -
                         // Icon region: centered in the upper part of the
                         // cell. Capped so a shrunken ultra-narrow cell
                         // never bleeds into its neighbors.
-                        let icon_side = if gallery {
-                            cell_w * 0.78
+                        let icon_side = if gallery
+                            && kind == EntryKind::File
+                            && crate::thumbs::is_thumb_ext(&abs_path)
+                        {
+                            cell_w * 0.88
                         } else {
                             52.0_f32.min(cell_w * 0.7)
                         };

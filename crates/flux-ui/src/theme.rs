@@ -44,6 +44,8 @@ impl Density {
 pub struct Palette {
     // Accents & states
     pub accent: Color32,
+    /// Opaque primary action background, contrasted against white labels.
+    pub accent_solid: Color32,
     /// Translucent accent tint — row selection, focused chrome.
     pub accent_fill: Color32,
     pub danger: Color32,
@@ -79,6 +81,7 @@ impl Palette {
         let accent = Color32::from_rgb(76, 139, 235);
         Self {
             accent,
+            accent_solid: Color32::from_rgb(39, 103, 201),
             accent_fill: accent.gamma_multiply(0.24),
             danger: Color32::from_rgb(229, 72, 77),
             warn: Color32::from_rgb(226, 175, 75),
@@ -106,6 +109,7 @@ impl Palette {
         let accent = Color32::from_rgb(40, 105, 215);
         Self {
             accent,
+            accent_solid: Color32::from_rgb(39, 103, 201),
             accent_fill: accent.gamma_multiply(0.14),
             danger: Color32::from_rgb(198, 52, 48),
             warn: Color32::from_rgb(160, 110, 20),

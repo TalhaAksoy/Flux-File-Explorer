@@ -45,6 +45,7 @@ pub struct ThumbCache {
     lru: Mutex<VecDeque<PathBuf>>,
     in_flight: Mutex<FxHashSet<PathBuf>>,
     clock: AtomicU64,
+    capacity: usize,
     res_rx: mpsc::Receiver<Msg>,
     req_tx: mpsc::Sender<PathBuf>,
     wake_ctx: Arc<Mutex<Option<egui::Context>>>,
@@ -67,7 +68,12 @@ pub fn is_thumb_ext(path: &Path) -> bool {
     })
 }
 
+#[cfg(test)]
 fn decode(path: &Path) -> Option<image::RgbaImage> {
+    decode_at(path, THUMB_PX)
+}
+
+fn decode_at(path: &Path, edge: u32) -> Option<image::RgbaImage> {
     let md = std::fs::metadata(path).ok()?;
     if !md.is_file() || md.len() > MAX_FILE_BYTES {
         return None;
@@ -82,11 +88,21 @@ fn decode(path: &Path) -> Option<image::RgbaImage> {
         .ok()?;
     reader.limits(limits);
     let img = reader.decode().ok()?;
-    Some(img.thumbnail(THUMB_PX, THUMB_PX).to_rgba8())
+    Some(img.thumbnail(edge, edge).to_rgba8())
 }
 
 impl ThumbCache {
     pub fn new() -> Self {
+        Self::with_size(THUMB_PX, MAX_CACHED)
+    }
+
+    /// Lazily allocated only for Gallery. 64 × 256² RGBA textures are
+    /// bounded to 16 MiB, separate from the lightweight details cache.
+    pub fn new_gallery() -> Self {
+        Self::with_size(256, 64)
+    }
+
+    fn with_size(edge: u32, capacity: usize) -> Self {
         let (req_tx, req_rx) = mpsc::channel::<PathBuf>();
         let (res_tx, res_rx) = mpsc::channel::<Msg>();
         let wake_ctx = Arc::new(Mutex::new(Option::<egui::Context>::None));
@@ -95,7 +111,7 @@ impl ThumbCache {
             .name("flux-thumbs".into())
             .spawn(move || {
                 while let Ok(path) = req_rx.recv() {
-                    let img = decode(&path);
+                    let img = decode_at(&path, edge);
                     if res_tx.send(Msg::Result(path, img)).is_err() {
                         return;
                     }
@@ -110,6 +126,7 @@ impl ThumbCache {
             lru: Mutex::new(VecDeque::new()),
             in_flight: Mutex::new(FxHashSet::default()),
             clock: AtomicU64::new(1),
+            capacity,
             res_rx,
             req_tx,
             wake_ctx,
@@ -131,7 +148,7 @@ impl ThumbCache {
         // Re-touches push duplicate keys; cap the deque so a long
         // session can't grow it without bound. Stale keys are skipped
         // during eviction anyway.
-        if lru.len() > MAX_CACHED * 4 {
+        if lru.len() > self.capacity * 4 {
             let mut seen = rustc_hash::FxHashSet::default();
             lru.retain(|k| map.contains_key(k) && seen.insert(k.clone()));
         }
@@ -162,7 +179,7 @@ impl ThumbCache {
             let mut inflight = self.in_flight.lock().unwrap();
             // In-flight is bounded by the cache cap — visible-row-only
             // requests keep it far smaller in practice.
-            if inflight.len() >= MAX_CACHED || !inflight.insert(path.to_path_buf()) {
+            if inflight.len() >= self.capacity || !inflight.insert(path.to_path_buf()) {
                 return None;
             }
         }
@@ -185,12 +202,12 @@ impl ThumbCache {
             };
             {
                 let mut map = self.map.write().unwrap();
-                if map.len() >= MAX_CACHED && !map.contains_key(&path) {
+                if map.len() >= self.capacity && !map.contains_key(&path) {
                     // Evict least-recently-touched entries. The deque may
                     // hold stale keys (re-touches push duplicates), so pop
                     // until an actually-cached key is found.
                     let mut lru = self.lru.lock().unwrap();
-                    while map.len() >= MAX_CACHED {
+                    while map.len() >= self.capacity {
                         let Some(victim) = lru.pop_front() else { break };
                         if map.contains_key(&victim) {
                             map.remove(&victim);
@@ -212,6 +229,18 @@ pub type ThumbCacheHandle = std::rc::Rc<ThumbCache>;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gallery_resolution_is_bounded_and_details_stay_small() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("landscape.png");
+        image::RgbaImage::new(1024, 512).save(&path).unwrap();
+        let small = decode(&path).unwrap();
+        let gallery = decode_at(&path, 256).unwrap();
+        assert_eq!((small.width(), small.height()), (64, 32));
+        assert_eq!((gallery.width(), gallery.height()), (256, 128));
+        assert_eq!(ThumbCache::new_gallery().capacity, 64);
+    }
 
     #[test]
     fn thumb_ext_filter() {

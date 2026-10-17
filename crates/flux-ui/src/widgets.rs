@@ -33,7 +33,7 @@ fn sized(btn: Button<'_>, min_w: f32) -> Button<'_> {
 
 /// Accent-filled primary action — the single obvious choice in a dialog.
 pub fn primary_button(ui: &mut Ui, label: &str) -> Response {
-    let accent = ui.visuals().selection.stroke.color;
+    let accent = Palette::of(ui.visuals()).accent_solid;
     ui.add(sized(
         Button::new(RichText::new(label).color(Color32::WHITE).size(13.5)).fill(accent),
         88.0,

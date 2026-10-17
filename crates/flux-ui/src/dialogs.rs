@@ -529,7 +529,7 @@ fn row_flags(app: &mut FluxApp, items: &[PathBuf]) -> RowFlags {
 pub fn row_context_menu(app: &mut FluxApp, ui: &mut egui::Ui, items: &[PathBuf]) {
     use crate::format::MOD_KEY as CMD;
     use crate::menu as m;
-    m::begin(ui, 224.0);
+    m::begin(ui, 264.0);
     let single = items.len() == 1;
     let first = items.first().cloned();
     let flags = row_flags(app, items);
@@ -752,7 +752,7 @@ pub fn row_context_menu(app: &mut FluxApp, ui: &mut egui::Ui, items: &[PathBuf])
 pub fn bg_context_menu(app: &mut FluxApp, ui: &mut egui::Ui) {
     use crate::format::MOD_KEY as CMD;
     use crate::menu as m;
-    m::begin(ui, 200.0);
+    m::begin(ui, 240.0);
     use crate::glyphs::Glyph;
     if m::item_icon_sc(ui, Glyph::Folder, "New Folder…", &format!("Shift+{CMD}+N")).clicked() {
         ui.close();

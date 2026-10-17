@@ -903,11 +903,17 @@ fn meta_row_copy(ui: &mut egui::Ui, pal: &Palette, label: &str, value: &str, cop
     ui.push_id(label, |ui| {
         let value_ui = |ui: &mut egui::Ui| {
             ui.horizontal_top(|ui| {
-                let width = (ui.available_width() - if copyable { 36.0 } else { 0.0 }).max(1.0);
+                let copy_width = if copyable {
+                    ui.spacing().interact_size.y + ui.spacing().item_spacing.x
+                } else {
+                    0.0
+                };
+                let width = (ui.available_width() - copy_width).max(1.0);
                 ui.allocate_ui_with_layout(
                     egui::vec2(width, 0.0),
                     egui::Layout::top_down(egui::Align::Min),
                     |ui| {
+                        ui.set_min_width(width);
                         ui.add(
                             egui::Label::new(
                                 egui::RichText::new(value)
@@ -945,6 +951,7 @@ fn meta_row_copy(ui: &mut egui::Ui, pal: &Palette, label: &str, value: &str, cop
                     egui::vec2(84.0, 0.0),
                     egui::Layout::top_down(egui::Align::Min),
                     |ui| {
+                        ui.set_min_width(84.0);
                         ui.label(
                             egui::RichText::new(label)
                                 .color(pal.text_secondary)
@@ -1402,6 +1409,54 @@ pub fn panel(app: &mut FluxApp, ui: &mut egui::Ui) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn metadata_copy_buttons_do_not_grow_the_panel_each_frame() {
+        for width in [180.0, 320.0, 520.0] {
+            let ctx = egui::Context::default();
+            crate::theme::apply_theme(&ctx, true);
+            for _ in 0..60 {
+                let mut out = ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(1440.0, 900.0),
+                        )),
+                        ..Default::default()
+                    },
+                    |ui| {
+                        let r = egui::Panel::right("preview_test")
+                            .resizable(true)
+                            .default_size(width)
+                            .size_range(180.0..=520.0)
+                            .show(ui, |ui| {
+                                let pal = Palette::of(ui.visuals());
+                                meta_row_copy(
+                                    ui,
+                                    &pal,
+                                    "Path",
+                                    "/home/user/İstanbul/a-long-file-name-with-unicode.txt",
+                                    true,
+                                );
+                                meta_row_copy(
+                                    ui,
+                                    &pal,
+                                    "SHA-256",
+                                    &"abcdef0123456789".repeat(4),
+                                    true,
+                                );
+                            });
+                        assert!(
+                            (r.response.rect.width() - width).abs() < 1.0,
+                            "panel grew: {:?}, expected {width}",
+                            r.response.rect
+                        );
+                    },
+                );
+                out.textures_delta.clear();
+            }
+        }
+    }
 
     #[test]
     fn load_handles_exif_jpeg() {
