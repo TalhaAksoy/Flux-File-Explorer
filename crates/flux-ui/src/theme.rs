@@ -4,6 +4,16 @@
 
 use egui::{Color32, CornerRadius, Stroke, Style, Visuals};
 
+/// Logical-point geometry shared by chrome, workspaces and preferences.
+pub mod metrics {
+    pub const BODY: f32 = 14.0;
+    pub const SECONDARY: f32 = 12.5;
+    pub const SECTION: f32 = 16.0;
+    pub const CONTROL: f32 = 34.0;
+    pub const SEGMENT: f32 = 32.0;
+    pub const TAB: f32 = 32.0;
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Density {
     Compact,
@@ -14,9 +24,9 @@ pub enum Density {
 impl Density {
     pub fn row_height(self) -> f32 {
         match self {
-            Density::Compact => 20.0,
-            Density::Standard => 24.0,
-            Density::Comfortable => 30.0,
+            Density::Compact => 24.0,
+            Density::Standard => 30.0,
+            Density::Comfortable => 36.0,
         }
     }
     pub fn next(self) -> Self {
@@ -66,7 +76,7 @@ pub struct Palette {
 
 impl Palette {
     pub fn dark() -> Self {
-        let accent = Color32::from_rgb(80, 140, 235);
+        let accent = Color32::from_rgb(76, 139, 235);
         Self {
             accent,
             accent_fill: accent.gamma_multiply(0.24),
@@ -81,10 +91,10 @@ impl Palette {
             stripe: Color32::from_rgb(35, 37, 42),
             surface_hover: Color32::from_rgb(42, 45, 50),
             surface_active: Color32::from_rgb(48, 51, 57),
-            surface_selected: Color32::from_rgb(48, 57, 67),
+            surface_selected: Color32::from_rgb(43, 64, 91),
             text_primary: Color32::from_rgb(232, 234, 237),
-            text_secondary: Color32::from_rgb(150, 155, 164),
-            text_muted: Color32::from_rgb(116, 122, 132),
+            text_secondary: Color32::from_rgb(174, 179, 188),
+            text_muted: Color32::from_rgb(148, 154, 165),
             dir_icon: Color32::from_rgb(96, 165, 250),
             file_icon: Color32::from_rgb(148, 156, 170),
             link_icon: Color32::from_rgb(180, 140, 230),
@@ -110,8 +120,8 @@ impl Palette {
             surface_active: Color32::from_rgb(228, 231, 236),
             surface_selected: Color32::from_rgb(226, 234, 243),
             text_primary: Color32::from_rgb(34, 37, 43),
-            text_secondary: Color32::from_rgb(108, 114, 125),
-            text_muted: Color32::from_rgb(154, 160, 170),
+            text_secondary: Color32::from_rgb(83, 91, 104),
+            text_muted: Color32::from_rgb(101, 109, 121),
             dir_icon: Color32::from_rgb(45, 125, 210),
             file_icon: Color32::from_rgb(110, 118, 132),
             link_icon: Color32::from_rgb(140, 95, 200),
@@ -188,7 +198,7 @@ pub fn apply_theme(ctx: &egui::Context, dark: bool) {
     v.hyperlink_color = p.accent;
     v.error_fg_color = p.danger;
     v.warn_fg_color = p.warn;
-    v.selection.bg_fill = p.accent_fill;
+    v.selection.bg_fill = p.surface_selected;
     v.selection.stroke = Stroke::new(1.0, p.accent);
 
     // Widget states: resting controls are borderless ghosts; interaction
@@ -249,15 +259,26 @@ pub fn apply_theme(ctx: &egui::Context, dark: bool) {
         visuals: v,
         ..Style::default()
     };
-    style.spacing.item_spacing = egui::vec2(8.0, 5.0);
+    style.animation_time = 0.12;
+    style.spacing.interact_size.y = metrics::CONTROL;
+    style.spacing.item_spacing = egui::vec2(8.0, 6.0);
     style.spacing.button_padding = egui::vec2(10.0, 5.0);
     style.spacing.menu_margin = egui::Margin::same(7);
     style.spacing.scroll = egui::style::ScrollStyle::floating();
     // Typography scale — quiet, readable, no marketing-size headings.
     let st = &mut style.text_styles;
-    st.insert(egui::TextStyle::Body, egui::FontId::proportional(13.5));
-    st.insert(egui::TextStyle::Button, egui::FontId::proportional(13.5));
-    st.insert(egui::TextStyle::Small, egui::FontId::proportional(11.5));
+    st.insert(
+        egui::TextStyle::Body,
+        egui::FontId::proportional(metrics::BODY),
+    );
+    st.insert(
+        egui::TextStyle::Button,
+        egui::FontId::proportional(metrics::BODY),
+    );
+    st.insert(
+        egui::TextStyle::Small,
+        egui::FontId::proportional(metrics::SECONDARY),
+    );
     st.insert(egui::TextStyle::Heading, egui::FontId::proportional(16.5));
     st.insert(egui::TextStyle::Monospace, egui::FontId::monospace(12.5));
 

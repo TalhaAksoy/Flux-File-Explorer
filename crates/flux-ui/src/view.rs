@@ -209,7 +209,7 @@ pub fn file_table(app: &mut FluxApp, ui: &mut egui::Ui) -> RowAction {
     if !matches!(app.settings.view_mode, flux_settings::ViewMode::List) {
         return match app.settings.view_mode {
             flux_settings::ViewMode::Compact => compact_list(app, ui, &pal),
-            flux_settings::ViewMode::Grid => icon_grid(app, ui, &pal, 96.0),
+            flux_settings::ViewMode::Grid => icon_grid(app, ui, &pal, 120.0),
             flux_settings::ViewMode::Gallery => icon_grid(app, ui, &pal, 200.0),
             flux_settings::ViewMode::List => unreachable!(),
         };
@@ -267,7 +267,7 @@ pub fn file_table(app: &mut FluxApp, ui: &mut egui::Ui) -> RowAction {
                     pal.text_secondary
                 };
                 let resp = ui.add(
-                    egui::Label::new(egui::RichText::new(label).size(12.0).color(col))
+                    egui::Label::new(egui::RichText::new(label).size(12.5).strong().color(col))
                         .sense(egui::Sense::click()),
                 );
                 if sorted {
@@ -292,7 +292,7 @@ pub fn file_table(app: &mut FluxApp, ui: &mut egui::Ui) -> RowAction {
     let mut vis_min = EntryIdx::MAX;
     let mut vis_max = 0;
     let mut live_widths: Option<[f32; 4]> = None;
-    builder.header(22.0, header).body(|body| {
+    builder.header(32.0, header).body(|body| {
         // Read widths BEFORE rows() consumes the body — reflects the
         // resize state already applied for this frame.
         let w = body.widths();
@@ -360,18 +360,25 @@ pub fn file_table(app: &mut FluxApp, ui: &mut egui::Ui) -> RowAction {
                     None => paint_entry_icon(ui.painter(), icon_rect, kind, &pal),
                 }
                 let text_pos = egui::pos2(rect.left() + row_h * 1.05, rect.center().y);
-                ui.painter().text(
+                crate::widgets::elided_text(
+                    ui.painter(),
                     text_pos,
-                    egui::Align2::LEFT_CENTER,
                     &name,
-                    egui::FontId::default(),
+                    egui::FontId::proportional(crate::theme::metrics::BODY),
                     pal.text_primary.gamma_multiply(ghost),
+                    (rect.right() - text_pos.x - 8.0).max(0.0),
                 );
             });
             // Metadata is secondary information — quieter color.
             let meta_col = pal.text_secondary.gamma_multiply(ghost);
             row.col(|ui| {
-                ui.label(egui::RichText::new(format_size(size)).color(meta_col));
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    ui.label(
+                        egui::RichText::new(format_size(size))
+                            .size(12.5)
+                            .color(meta_col),
+                    );
+                });
             });
             row.col(|ui| {
                 ui.label(egui::RichText::new(format_mtime(mtime)).color(meta_col));
@@ -604,7 +611,7 @@ fn icon_grid(app: &mut FluxApp, ui: &mut egui::Ui, pal: &Palette, cell_w: f32) -
         ui.spacing().item_spacing.x,
         ui.spacing().scroll.allocated_width(),
     );
-    let cell_h = cell_w + 20.0; // icon area + one name line
+    let cell_h = if gallery { cell_w + 20.0 } else { 112.0 };
     app.grid_cols = cols;
     let n_rows = view_len.div_ceil(cols);
 
@@ -691,10 +698,10 @@ fn icon_grid(app: &mut FluxApp, ui: &mut egui::Ui, pal: &Palette, cell_w: f32) -
                         let icon_side = if gallery {
                             cell_w * 0.78
                         } else {
-                            44.0_f32.min(cell_w * 0.7)
+                            52.0_f32.min(cell_w * 0.7)
                         };
                         let icon_rect = egui::Rect::from_center_size(
-                            egui::pos2(rect.center().x, rect.top() + icon_side * 0.6),
+                            egui::pos2(rect.center().x, rect.top() + (cell_h - 30.0) * 0.5),
                             Vec2::splat(icon_side),
                         );
                         let thumb =
@@ -731,13 +738,17 @@ fn icon_grid(app: &mut FluxApp, ui: &mut egui::Ui, pal: &Palette, cell_w: f32) -
                             egui::pos2(rect.right() - 4.0, rect.bottom() - 2.0),
                         );
                         let p = ui.painter().with_clip_rect(name_rect);
-                        p.text(
-                            egui::pos2(name_rect.center().x, name_rect.center().y),
-                            egui::Align2::CENTER_CENTER,
-                            &name,
-                            egui::FontId::proportional(if gallery { 13.0 } else { 11.5 }),
-                            pal.text_primary.gamma_multiply(ghost),
+                        let color = pal.text_primary.gamma_multiply(ghost);
+                        let mut job = egui::text::LayoutJob::simple(
+                            name.clone(),
+                            egui::FontId::proportional(13.5),
+                            color,
+                            name_rect.width().max(0.0),
                         );
+                        job.wrap.max_rows = 1;
+                        job.wrap.break_anywhere = true;
+                        let galley = p.layout_job(job);
+                        p.galley(name_rect.center() - galley.size() * 0.5, galley, color);
 
                         if resp.hovered() {
                             action.hovered = Some(idx);
@@ -769,6 +780,7 @@ fn icon_grid(app: &mut FluxApp, ui: &mut egui::Ui, pal: &Palette, cell_w: f32) -
                             action.context =
                                 Some((row_idx, resp.interact_pointer_pos().unwrap_or_default()));
                         }
+                        resp.on_hover_text(&name);
                     }
                 });
             }

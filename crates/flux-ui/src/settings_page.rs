@@ -275,7 +275,7 @@ pub fn page(app: &mut FluxApp, ui: &mut egui::Ui) {
     // plain horizontal would leave both columns vertically compressed.
     let avail = ui.available_rect_before_wrap();
     ui.allocate_rect(avail, egui::Sense::hover());
-    let nav_w = 190.0_f32.min(avail.width() * 0.35);
+    let nav_w = 216.0_f32.min(avail.width() * 0.3);
     let sep_x = avail.left() + nav_w + 5.0;
     let nav_rect = egui::Rect::from_min_size(avail.min, egui::vec2(nav_w, avail.height()));
     let content_rect = egui::Rect::from_min_max(egui::pos2(sep_x + 5.0, avail.top()), avail.max);
@@ -307,10 +307,11 @@ pub fn page(app: &mut FluxApp, ui: &mut egui::Ui) {
         egui::Stroke::new(1.0, pal.border_soft),
     );
 
-    // ── Content column, centered, capped width ──
+    // Keep preferences near their navigation, not marooned in the
+    // center of an ultrawide workspace. Leave a quiet trailing margin.
     let avail_w = content_rect.width();
-    let col_w = (avail_w - sp::XXL * 2.0).clamp(320.0, 880.0).min(avail_w);
-    let x_off = ((avail_w - col_w) / 2.0).max(0.0);
+    let x_off = sp::XXL.min(avail_w * 0.06);
+    let col_w = (avail_w - x_off * 2.0).clamp(0.0, 840.0);
     let col_rect = egui::Rect::from_min_size(
         egui::pos2(content_rect.left() + x_off, content_rect.top()),
         egui::vec2(col_w, content_rect.height()),
@@ -346,7 +347,7 @@ fn back_button(ui: &mut egui::Ui, pal: &Palette, tip: &str) -> egui::Response {
 /// A nav row: icon + label, selected pill, comfortable hit target.
 fn nav_row(ui: &mut egui::Ui, pal: &Palette, cat: Category, selected: bool) -> egui::Response {
     let w = ui.available_width();
-    let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, 34.0), egui::Sense::click());
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, 40.0), egui::Sense::click());
     let pill = rect.shrink2(egui::vec2(2.0, 2.0));
     if selected {
         ui.painter()
@@ -373,7 +374,7 @@ fn nav_row(ui: &mut egui::Ui, pal: &Palette, cat: Category, selected: bool) -> e
         egui::pos2(rect.left() + 38.0, rect.center().y),
         egui::Align2::LEFT_CENTER,
         cat.label(),
-        egui::FontId::proportional(13.5),
+        egui::FontId::proportional(14.0),
         if selected {
             pal.text_primary
         } else {
@@ -429,7 +430,7 @@ fn content(
             ui.label(
                 egui::RichText::new(category.label())
                     .color(pal.text_primary)
-                    .size(19.0)
+                    .size(22.0)
                     .strong(),
             );
             ui.add_space(2.0);

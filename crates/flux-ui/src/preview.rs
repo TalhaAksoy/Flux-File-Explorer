@@ -897,46 +897,77 @@ fn meta_row(ui: &mut egui::Ui, pal: &Palette, label: &str, value: &str) {
 }
 
 fn meta_row_copy(ui: &mut egui::Ui, pal: &Palette, label: &str, value: &str, copyable: bool) {
-    ui.horizontal(|ui| {
-        ui.add_sized(
-            [92.0, 16.0],
-            egui::Label::new(egui::RichText::new(label).color(pal.text_muted).size(11.5)),
-        );
-        let r = ui
-            .add(
-                egui::Label::new(
-                    egui::RichText::new(value)
-                        .color(pal.text_secondary)
-                        .size(11.5),
-                )
-                .wrap(),
-            )
-            .on_hover_text(value);
-        let _ = r;
-        if copyable {
-            let copy = ui
-                .add(
-                    egui::Button::new(egui::RichText::new("⧉").color(pal.text_muted).size(11.0))
-                        .frame(false),
-                )
-                .on_hover_text("Copy");
-            if copy.clicked() {
-                ui.ctx().copy_text(value.to_string());
-            }
+    // Reserve the value and copy target before laying out wrapping text.
+    // At the minimum panel width use a stacked row, not a squeezed grid.
+    let narrow = ui.available_width() < 240.0;
+    ui.push_id(label, |ui| {
+        let value_ui = |ui: &mut egui::Ui| {
+            ui.horizontal_top(|ui| {
+                let width = (ui.available_width() - if copyable { 36.0 } else { 0.0 }).max(1.0);
+                ui.allocate_ui_with_layout(
+                    egui::vec2(width, 0.0),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| {
+                        ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(value)
+                                    .color(pal.text_primary)
+                                    .size(12.5),
+                            )
+                            .wrap(),
+                        )
+                        .on_hover_text(value);
+                    },
+                );
+                if copyable
+                    && crate::glyphs::icon_button(
+                        ui,
+                        crate::glyphs::Glyph::Copy,
+                        "Copy value",
+                        true,
+                    )
+                    .clicked()
+                {
+                    ui.ctx().copy_text(value.to_owned());
+                }
+            });
+        };
+        if narrow {
+            ui.label(
+                egui::RichText::new(label)
+                    .color(pal.text_secondary)
+                    .size(12.5),
+            );
+            value_ui(ui);
+        } else {
+            ui.horizontal_top(|ui| {
+                ui.allocate_ui_with_layout(
+                    egui::vec2(84.0, 0.0),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| {
+                        ui.label(
+                            egui::RichText::new(label)
+                                .color(pal.text_secondary)
+                                .size(12.5),
+                        );
+                    },
+                );
+                value_ui(ui);
+            });
         }
     });
-    ui.add_space(1.5);
+    ui.add_space(4.0);
 }
 
 fn section(ui: &mut egui::Ui, pal: &Palette, title: &str) {
-    ui.add_space(6.0);
+    ui.add_space(16.0);
     ui.label(
-        egui::RichText::new(title.to_uppercase())
-            .color(pal.text_muted)
-            .size(9.5)
+        egui::RichText::new(title)
+            .color(pal.text_primary)
+            .size(14.0)
             .strong(),
     );
-    ui.add_space(3.0);
+    ui.add_space(8.0);
 }
 
 fn fmt_time(t: Option<SystemTime>) -> Option<String> {
@@ -1283,10 +1314,10 @@ pub fn panel(app: &mut FluxApp, ui: &mut egui::Ui) {
     ui.label(
         egui::RichText::new(&name)
             .color(pal.text_primary)
-            .size(14.0)
+            .size(16.0)
             .strong(),
     );
-    ui.add_space(8.0);
+    ui.add_space(12.0);
 
     // Preview leads (Finder Quick Look order); metadata sits below it.
     match app.preview.as_ref() {
@@ -1348,7 +1379,8 @@ pub fn panel(app: &mut FluxApp, ui: &mut egui::Ui) {
             if let Some(tex) = &app.preview_tex {
                 let size = tex.size_vec2();
                 let w = ui.available_width().max(1.0);
-                let scaled = size * (w / size.x).min(1.0);
+                let h = (ui.available_height() * 0.4).clamp(80.0, 280.0);
+                let scaled = size * (w / size.x).min(h / size.y).min(1.0);
                 ui.vertical_centered(|ui| {
                     ui.add(egui::Image::from_texture(tex).max_size(scaled));
                 });

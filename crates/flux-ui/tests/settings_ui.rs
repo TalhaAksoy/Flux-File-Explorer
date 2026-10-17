@@ -81,7 +81,11 @@ fn segmented_cells(ctx: &egui::Context, n: usize) -> Vec<Rect> {
     let mut cells: Vec<Rect> = click_rects(ctx)
         .into_iter()
         .map(|(_, r)| r)
-        .filter(|r| (21.5..=22.5).contains(&r.height()) && r.width() > 30.0 && r.left() > 700.0)
+        .filter(|r| {
+            (r.height() - (flux_ui::theme::metrics::SEGMENT - 6.0)).abs() < 0.5
+                && r.width() > 30.0
+                && r.left() > 500.0
+        })
         .collect();
     cells.sort_by(|a, b| {
         a.center()
@@ -176,7 +180,7 @@ fn switch_rects(ctx: &egui::Context) -> Vec<Rect> {
         .into_iter()
         .map(|(_, r)| r)
         .filter(|r| {
-            (r.width() - 36.0).abs() < 3.0 && (r.height() - 20.0).abs() < 3.0 && r.left() > 700.0
+            (r.width() - 36.0).abs() < 3.0 && (r.height() - 20.0).abs() < 3.0 && r.left() > 500.0
         })
         .collect();
     v.sort_by(|a, b| a.center().y.partial_cmp(&b.center().y).unwrap());
@@ -277,7 +281,9 @@ fn reset_all_restores_defaults_and_keeps_tabs() {
     let arm = click_rects(&ctx)
         .into_iter()
         .map(|(_, r)| r)
-        .find(|r| (28.0..=32.0).contains(&r.height()) && r.center().y > 200.0)
+        .find(|r| {
+            (r.height() - flux_ui::theme::metrics::CONTROL).abs() < 0.5 && r.center().y > 200.0
+        })
         .expect("reset-all button not found");
     click_at(&ctx, &mut app, arm.center());
     frame(&ctx, &mut app, input(Vec::new()));
@@ -286,7 +292,9 @@ fn reset_all_restores_defaults_and_keeps_tabs() {
     let mut confirm_row: Vec<Rect> = click_rects(&ctx)
         .into_iter()
         .map(|(_, r)| r)
-        .filter(|r| (28.0..=32.0).contains(&r.height()) && r.center().y > 200.0)
+        .filter(|r| {
+            (r.height() - flux_ui::theme::metrics::CONTROL).abs() < 0.5 && r.center().y > 200.0
+        })
         .collect();
     confirm_row.sort_by(|a, b| a.center().x.partial_cmp(&b.center().x).unwrap());
     assert!(
@@ -346,9 +354,28 @@ fn control_in_search_results_is_functional() {
 fn segmented_is_keyboard_activatable() {
     let (ctx, mut app) = settings_app();
     frame(&ctx, &mut app, input(Vec::new()));
-    // egui focus navigation: Shift+Tab/Tab cycles focusable widgets.
-    // Drive Tab presses until the theme control (or its cells) is
-    // focused, then activate with Enter/Space.
+    // Focus the actual painted Dark segment, then activate through
+    // egui's keyboard event pipeline. A no-op must fail this test.
+    let dark = segmented_cells(&ctx, 0)[1];
+    let id = click_rects(&ctx)
+        .into_iter()
+        .find(|(_, r)| *r == dark)
+        .unwrap()
+        .0;
+    ctx.memory_mut(|m| m.request_focus(id));
+    frame(
+        &ctx,
+        &mut app,
+        input(vec![egui::Event::Key {
+            key: egui::Key::Enter,
+            physical_key: None,
+            modifiers: egui::Modifiers::NONE,
+            repeat: false,
+            pressed: true,
+        }]),
+    );
+    assert_eq!(app.settings.theme, flux_settings::Theme::Dark);
+    // Also walk Tab navigation to guard against a broken focus chain.
     let theme = app.settings.theme;
     for _ in 0..40 {
         if ctx.memory(|m| m.focused()).is_some() {

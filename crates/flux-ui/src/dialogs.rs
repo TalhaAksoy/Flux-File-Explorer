@@ -24,8 +24,8 @@ fn card(ctx: &egui::Context, title: &'static str) -> egui::Window<'static> {
 }
 
 fn heading(ui: &mut egui::Ui, title: &str) {
-    ui.label(egui::RichText::new(title).size(17.0).strong());
-    ui.add_space(2.0);
+    ui.label(egui::RichText::new(title).size(20.0).strong());
+    ui.add_space(8.0);
 }
 
 /// Right-aligned [primary][Cancel] footer. Returns (primary, cancel).
@@ -39,7 +39,8 @@ fn footer(ui: &mut egui::Ui, primary: &str, primary_enabled: bool) -> (bool, boo
             } else {
                 ui.add_enabled(
                     false,
-                    egui::Button::new(primary).min_size(egui::vec2(88.0, 30.0)),
+                    egui::Button::new(primary)
+                        .min_size(egui::vec2(88.0, crate::theme::metrics::CONTROL)),
                 );
             }
             ui.add_space(4.0);
