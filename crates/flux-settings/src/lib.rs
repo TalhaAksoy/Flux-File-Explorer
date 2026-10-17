@@ -32,9 +32,19 @@ pub enum ViewMode {
     Gallery,
 }
 
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub enum IconSource {
+    Flux,
+    System,
+    #[default]
+    Automatic,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Settings {
     pub theme: Theme,
+    #[serde(default)]
+    pub icon_source: IconSource,
     pub density: Density,
     pub show_hidden: bool,
     /// Reveal hidden+system "protected operating system files" (Windows).
@@ -87,6 +97,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             theme: Theme::System,
+            icon_source: IconSource::Automatic,
             density: Density::Standard,
             show_hidden: false,
             show_system_files: false,

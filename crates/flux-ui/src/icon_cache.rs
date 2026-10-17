@@ -1,227 +1,477 @@
-//! Background icon fetching + texture cache.
-//!
-//! The OS icon call is synchronous and slow-ish (ms each), so it runs on a
-//! dedicated worker. The UI requests icons for *visible rows only* and gets
-//! `None` until the texture lands, falling back to painted glyphs. Cache is
-//! keyed by file *kind* (folder / extension), not per-path — a `.png` icon
-//! is the same for every png on macOS/Windows.
+//! Shared file presentation: original vector identities plus bounded,
+//! asynchronous native artwork. No filesystem/native calls while painting.
+use crate::{file_icons, icon_evidence::EvidenceCache, theme::Palette};
+use flux_core::{
+    DirEntry, EntryKind,
+    file_type::{self, IconId},
+};
+use flux_settings::IconSource;
+use rustc_hash::{FxHashMap, FxHashSet};
+use std::{
+    cell::{Cell, RefCell},
+    ffi::OsStr,
+    path::{Path, PathBuf},
+    sync::{Arc, Mutex, mpsc},
+};
 
-use std::collections::HashSet;
-use std::ffi::OsStr;
-use std::path::PathBuf;
-use std::sync::mpsc;
-use std::sync::{Arc, Mutex, RwLock};
-
-use flux_core::{DirEntry, EntryKind};
-use rustc_hash::FxHashMap;
-
-/// What makes an icon distinct. OsStr ext → lowercase String keeps the key
-/// hashable and cheap.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum IconKey {
     Folder,
     Symlink,
-    /// Lowercased extension; empty string = generic file.
+    Type(IconId),
     Ext(String),
-    /// Items whose icon is genuinely per-path (e.g. ".app" bundles are dirs
-    /// on disk but carry their own icon).
     Path(PathBuf),
 }
-
 impl IconKey {
-    /// Cache key for an entry — O(1) for dirs, one small lowercase for files.
-    /// `path` is the entry's absolute path (needed only for per-path keys).
-    pub fn for_entry(e: &DirEntry, path: &std::path::Path) -> Self {
-        match e.kind {
-            EntryKind::Dir => {
-                // ".app" bundles have unique icons per app. `DirEntry::extension`
-                // returns None for dirs, so look at the name directly.
-                let is_bundle = std::path::Path::new(&e.name)
-                    .extension()
-                    .is_some_and(|x| x.eq_ignore_ascii_case(OsStr::new("app")));
-                if is_bundle {
-                    IconKey::Path(path.to_path_buf())
-                } else {
-                    IconKey::Folder
-                }
-            }
-            EntryKind::Symlink => IconKey::Symlink,
-            _ => IconKey::Ext(
-                e.extension()
-                    .map(|x| x.to_string_lossy().to_lowercase())
-                    .unwrap_or_default(),
-            ),
-        }
+    pub fn for_entry(e: &DirEntry, path: &Path) -> Self {
+        Self::for_entry_path(e.kind, path)
     }
-
-    /// Key for a bare path + kind (search hits have no `DirEntry`).
-    pub fn for_entry_path(kind: EntryKind, path: &std::path::Path) -> Self {
-        match kind {
-            EntryKind::Dir => {
-                let is_bundle = path
-                    .extension()
-                    .is_some_and(|x| x.eq_ignore_ascii_case(OsStr::new("app")));
-                if is_bundle {
-                    IconKey::Path(path.to_path_buf())
-                } else {
-                    IconKey::Folder
-                }
-            }
-            EntryKind::Symlink => IconKey::Symlink,
-            _ => IconKey::Ext(
-                path.extension()
-                    .map(|x| x.to_string_lossy().to_lowercase())
-                    .unwrap_or_default(),
-            ),
+    pub fn for_entry_path(kind: EntryKind, path: &Path) -> Self {
+        let id = file_type::resolve(kind, path);
+        match id {
+            IconId::Folder => Self::Folder,
+            IconId::Symlink => Self::Symlink,
+            IconId::App | IconId::Framework | IconId::Xcode => Self::Path(path.to_owned()),
+            IconId::Exe if cfg!(target_os = "windows") => Self::Path(path.to_owned()),
+            _ => Self::Type(id),
         }
     }
 }
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct Request {
+    key: IconKey,
+    pixels: u16,
+    dark: bool,
+    generation: u64,
+}
+struct Cached {
+    texture: Option<egui::TextureHandle>,
+    touched: u64,
+    bytes: usize,
+}
+struct Message {
+    request: Request,
+    icon: Option<flux_platform::FileIcon>,
+}
 
-enum IconMsg {
-    Result(IconKey, Option<flux_platform::FileIcon>),
+pub const MAX_CACHED: usize = 512;
+pub const MAX_BYTES: usize = 8 * 1024 * 1024;
+pub const MAX_PENDING: usize = 32;
+const UPLOADS_PER_FRAME: usize = 8;
+
+#[derive(Clone, Copy, Default, Debug)]
+pub struct IconStats {
+    pub native_hits: u64,
+    pub native_misses: u64,
+    pub requests: u64,
+    pub bundled_draws: u64,
+    pub native_draws: u64,
+    pub entries: usize,
+    pub texture_bytes: usize,
+    pub pending: usize,
 }
 
 pub struct IconCache {
-    /// Key → resolved texture, or `None` when the OS has no icon for it
-    /// (Linux ships no provider — `file_icon` always yields None).
-    /// Negative results are cached too: without an entry, `texture()`
-    /// would re-queue the same unresolvable fetch every frame, spinning
-    /// the worker and repaint-looping the UI forever.
-    map: RwLock<FxHashMap<IconKey, Option<egui::TextureHandle>>>,
-    in_flight: Mutex<HashSet<IconKey>>,
-    res_rx: mpsc::Receiver<IconMsg>,
-    /// Keep the sender for the worker.
-    req_tx: mpsc::Sender<(IconKey, PathBuf)>,
-    /// Set once at startup so the worker can wake a reactive egui loop.
-    wake_ctx: Arc<Mutex<Option<egui::Context>>>,
+    map: RefCell<FxHashMap<Request, Cached>>,
+    pending: RefCell<FxHashSet<Request>>,
+    tx: mpsc::SyncSender<(Request, PathBuf)>,
+    rx: mpsc::Receiver<Message>,
+    wake: Arc<Mutex<Option<egui::Context>>>,
+    clock: Cell<u64>,
+    source: Cell<IconSource>,
+    path_generation: Cell<u64>,
+    stats: Cell<IconStats>,
+    evidence: EvidenceCache,
 }
-
-const ICON_PX: u16 = 32;
-/// Hard cap on cached textures; extension diversity is small in practice.
-const MAX_CACHED: usize = 512;
-
 impl Default for IconCache {
     fn default() -> Self {
         Self::new()
     }
 }
-
 impl IconCache {
     pub fn new() -> Self {
-        let (req_tx, req_rx) = mpsc::channel::<(IconKey, PathBuf)>();
-        let (res_tx, res_rx) = mpsc::channel::<IconMsg>();
-        let wake_ctx = Arc::new(Mutex::new(Option::<egui::Context>::None));
-        let wake = wake_ctx.clone();
+        let (tx, jobs) = mpsc::sync_channel::<(Request, PathBuf)>(MAX_PENDING);
+        let (results, rx) = mpsc::sync_channel(MAX_PENDING);
+        let wake = Arc::new(Mutex::new(None::<egui::Context>));
+        let w = wake.clone();
         std::thread::Builder::new()
             .name("flux-icons".into())
             .spawn(move || {
-                while let Ok((key, path)) = req_rx.recv() {
-                    let icon = flux_platform::file_icon(&path, ICON_PX);
-                    if res_tx.send(IconMsg::Result(key, icon)).is_err() {
-                        return;
+                while let Ok((request, path)) = jobs.recv() {
+                    let icon = flux_platform::file_icon(&path, request.pixels).and_then(|icon| {
+                        let expected = (icon.width as usize)
+                            .checked_mul(icon.height as usize)?
+                            .checked_mul(4)?;
+                        if icon.width == 0
+                            || icon.height == 0
+                            || expected != icon.rgba.len()
+                            || expected > 4 * 1024 * 1024
+                        {
+                            return None;
+                        }
+                        if icon.width > request.pixels as u32 || icon.height > request.pixels as u32
+                        {
+                            let img =
+                                image::RgbaImage::from_raw(icon.width, icon.height, icon.rgba)?;
+                            let factor = (request.pixels as f32 / icon.width as f32)
+                                .min(request.pixels as f32 / icon.height as f32);
+                            let resized = image::imageops::resize(
+                                &img,
+                                (icon.width as f32 * factor).max(1.0) as u32,
+                                (icon.height as f32 * factor).max(1.0) as u32,
+                                image::imageops::FilterType::Triangle,
+                            );
+                            Some(flux_platform::FileIcon {
+                                width: resized.width(),
+                                height: resized.height(),
+                                rgba: resized.into_raw(),
+                            })
+                        } else {
+                            Some(icon)
+                        }
+                    });
+                    if results.send(Message { request, icon }).is_err() {
+                        break;
                     }
-                    if let Some(c) = wake.lock().unwrap().as_ref() {
-                        c.request_repaint();
+                    if let Some(ctx) = w.lock().unwrap().as_ref() {
+                        ctx.request_repaint();
                     }
                 }
             })
-            .ok();
+            .expect("spawn native icon worker");
         Self {
-            map: RwLock::new(FxHashMap::default()),
-            in_flight: Mutex::new(HashSet::new()),
-            res_rx,
-            req_tx,
-            wake_ctx,
+            map: Default::default(),
+            pending: Default::default(),
+            tx,
+            rx,
+            wake,
+            clock: Cell::new(0),
+            source: Cell::new(IconSource::Automatic),
+            path_generation: Cell::new(0),
+            stats: Cell::new(IconStats::default()),
+            evidence: EvidenceCache::new(),
         }
     }
-
-    /// Hand the cache a Context so the worker can request repaints when
-    /// results land (egui is reactive — without this icons stall).
     pub fn set_ctx(&self, ctx: egui::Context) {
-        *self.wake_ctx.lock().unwrap() = Some(ctx);
+        *self.wake.lock().unwrap() = Some(ctx.clone());
+        self.evidence.set_ctx(ctx);
     }
-
-    /// Read-only lookup — never queues a fetch. Used by the drag ghost,
-    /// which must not trigger fetches for its own icon.
-    pub fn peek(&self, key: &IconKey) -> Option<egui::TextureId> {
-        self.map.read().unwrap().get(key)?.as_ref().map(|t| t.id())
+    pub fn set_source(&self, source: IconSource) {
+        self.source.set(source);
     }
-
-    /// Look up a texture; if missing, queue a fetch and return None.
-    /// `path` is the absolute path used as the fetch's representative.
-    pub fn texture(&self, key: &IconKey, path: &std::path::Path) -> Option<egui::TextureId> {
-        if let Some(t) = self.map.read().unwrap().get(key) {
-            return t.as_ref().map(|h| h.id());
+    pub fn source(&self) -> IconSource {
+        self.source.get()
+    }
+    pub fn invalidate_evidence(&self) {
+        self.evidence.invalidate();
+        self.path_generation
+            .set(self.path_generation.get().wrapping_add(1));
+        self.map
+            .borrow_mut()
+            .retain(|request, _| !matches!(request.key, IconKey::Path(_)));
+    }
+    fn request(&self, key: IconKey, pixels: u16, dark: bool) -> Request {
+        let generation = if matches!(key, IconKey::Path(_)) {
+            self.path_generation.get()
+        } else {
+            0
+        };
+        Request {
+            key,
+            pixels,
+            dark,
+            generation,
         }
-        {
-            let mut inflight = self.in_flight.lock().unwrap();
-            if inflight.len() >= MAX_CACHED || !inflight.insert(key.clone()) {
-                return None;
+    }
+    pub fn file_type(&self, kind: EntryKind, path: &Path) -> IconId {
+        self.evidence.resolved(kind, path, false)
+    }
+    pub fn stats(&self) -> IconStats {
+        let mut s = self.stats.get();
+        let map = self.map.borrow();
+        s.entries = map.len();
+        s.texture_bytes = map.values().map(|v| v.bytes).sum();
+        s.pending = self.pending.borrow().len();
+        s
+    }
+    fn tick(&self) -> u64 {
+        let t = self.clock.get().wrapping_add(1);
+        self.clock.set(t);
+        t
+    }
+    fn native_key(key: &IconKey, path: &Path) -> IconKey {
+        match key {
+            IconKey::Type(_) => IconKey::Ext(
+                path.extension()
+                    .unwrap_or(OsStr::new(""))
+                    .to_string_lossy()
+                    .to_ascii_lowercase(),
+            ),
+            _ => key.clone(),
+        }
+    }
+    fn lookup(&self, request: &Request, path: &Path, queue: bool) -> Option<egui::TextureId> {
+        let tick = self.tick();
+        let mut stats = self.stats.get();
+        if let Some(c) = self.map.borrow_mut().get_mut(request) {
+            c.touched = tick;
+            stats.native_hits += 1;
+            self.stats.set(stats);
+            return c.texture.as_ref().map(|t| t.id());
+        }
+        stats.native_misses += 1;
+        if queue {
+            let mut pending = self.pending.borrow_mut();
+            if pending.len() < MAX_PENDING && pending.insert(request.clone()) {
+                if self
+                    .tx
+                    .try_send((request.clone(), path.to_owned()))
+                    .is_err()
+                {
+                    pending.remove(request);
+                } else {
+                    stats.requests += 1;
+                }
             }
         }
-        let _ = self.req_tx.send((key.clone(), path.to_path_buf()));
+        self.stats.set(stats);
         None
     }
-
-    /// Drain completed fetches; upload textures on the UI thread (GL upload
-    /// must happen here, not on the worker). Returns count of new icons.
-    pub fn pump(&self, ctx: &egui::Context) -> usize {
-        let mut n = 0;
-        while let Ok(IconMsg::Result(key, icon)) = self.res_rx.try_recv() {
-            self.in_flight.lock().unwrap().remove(&key);
-            let tex = icon.map(|icon| {
-                let img = egui::ColorImage::from_rgba_unmultiplied(
-                    [icon.width as usize, icon.height as usize],
-                    &icon.rgba,
+    /// Legacy native-cache entry point; shared renderer below handles policy.
+    pub fn texture(&self, key: &IconKey, path: &Path) -> Option<egui::TextureId> {
+        self.lookup(
+            &self.request(Self::native_key(key, path), 32, false),
+            path,
+            true,
+        )
+    }
+    pub fn peek(&self, key: &IconKey) -> Option<egui::TextureId> {
+        self.map
+            .borrow()
+            .iter()
+            .filter(|(r, _)| r.key == *key)
+            .max_by_key(|(_, v)| v.touched)
+            .and_then(|(_, v)| v.texture.as_ref().map(|t| t.id()))
+    }
+    pub fn paint(
+        &self,
+        p: &egui::Painter,
+        rect: egui::Rect,
+        kind: EntryKind,
+        path: &Path,
+        pal: &Palette,
+    ) {
+        self.paint_impl(p, rect, kind, path, pal, true);
+    }
+    pub fn paint_cached(
+        &self,
+        p: &egui::Painter,
+        rect: egui::Rect,
+        kind: EntryKind,
+        path: &Path,
+        pal: &Palette,
+    ) {
+        self.paint_impl(p, rect, kind, path, pal, false);
+    }
+    fn paint_impl(
+        &self,
+        p: &egui::Painter,
+        rect: egui::Rect,
+        kind: EntryKind,
+        path: &Path,
+        pal: &Palette,
+        queue: bool,
+    ) {
+        let id = self.evidence.resolved(kind, path, queue);
+        let native_available = cfg!(any(target_os = "windows", target_os = "macos"));
+        let application = matches!(id, IconId::App | IconId::Framework | IconId::Xcode)
+            || (cfg!(target_os = "windows") && id == IconId::Exe);
+        if native_available
+            && (self.source.get() == IconSource::System
+                || (self.source.get() == IconSource::Automatic && application))
+        {
+            let key = IconKey::for_entry_path(kind, path);
+            let pixels = size_bucket(rect.width().max(rect.height()) * p.ctx().pixels_per_point());
+            let request = self.request(
+                Self::native_key(&key, path),
+                pixels,
+                pal.bg_content.r() < 128,
+            );
+            if let Some(texture) = self.lookup(&request, path, queue) {
+                p.image(
+                    texture,
+                    rect,
+                    egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
+                    egui::Color32::WHITE,
                 );
-                ctx.load_texture("icon", img, egui::TextureOptions::LINEAR)
-            });
-            let mut map = self.map.write().unwrap();
-            if map.len() >= MAX_CACHED {
-                // Evict: simple whole-cache reset — icons re-request on
-                // next visible frame; keeps eviction O(1) instead of LRU.
-                map.clear();
+                let mut s = self.stats.get();
+                s.native_draws += 1;
+                self.stats.set(s);
+                return;
             }
-            map.insert(key, tex);
+        }
+        file_icons::paint(p, rect, id, pal);
+        let mut s = self.stats.get();
+        s.bundled_draws += 1;
+        self.stats.set(s);
+    }
+    /// Main-thread uploads are limited per frame. Both request and result
+    /// queues are bounded; negative entries participate in the same LRU.
+    pub fn pump(&self, ctx: &egui::Context) -> usize {
+        let mut n = self.evidence.pump();
+        for _ in 0..UPLOADS_PER_FRAME {
+            let Ok(msg) = self.rx.try_recv() else {
+                break;
+            };
+            self.pending.borrow_mut().remove(&msg.request);
+            if matches!(msg.request.key, IconKey::Path(_))
+                && msg.request.generation != self.path_generation.get()
+            {
+                continue;
+            }
+            let bytes = msg.icon.as_ref().map_or(0, |i| i.rgba.len());
+            let mut map = self.map.borrow_mut();
+            trim_cache(&mut map, bytes);
+            let texture = msg.icon.map(|i| {
+                ctx.load_texture(
+                    "native-file-icon",
+                    egui::ColorImage::from_rgba_unmultiplied(
+                        [i.width as usize, i.height as usize],
+                        &i.rgba,
+                    ),
+                    egui::TextureOptions::LINEAR,
+                )
+            });
+            map.insert(
+                msg.request,
+                Cached {
+                    texture,
+                    bytes,
+                    touched: self.tick(),
+                },
+            );
             n += 1;
+        }
+        if !self.pending.borrow().is_empty() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(30));
         }
         n
     }
 }
 
-/// UI-thread-only (the receiver and textures are !Sync). Rc, not Arc.
+fn trim_cache(map: &mut FxHashMap<Request, Cached>, incoming_bytes: usize) {
+    let mut used: usize = map.values().map(|v| v.bytes).sum();
+    while !map.is_empty() && (map.len() >= MAX_CACHED || used + incoming_bytes > MAX_BYTES) {
+        let victim = map
+            .iter()
+            .min_by_key(|(_, v)| v.touched)
+            .map(|(k, _)| k.clone())
+            .unwrap();
+        used = used.saturating_sub(map.remove(&victim).unwrap().bytes);
+    }
+}
+
+pub fn size_bucket(pixels: f32) -> u16 {
+    [16, 24, 32, 48, 64, 96, 128, 192, 256, 384, 512]
+        .into_iter()
+        .find(|&s| s as f32 >= pixels)
+        .unwrap_or(512)
+}
 pub type IconCacheHandle = std::rc::Rc<IconCache>;
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
-    fn icon_roundtrip_via_worker() {
-        let c = IconCache::new();
-        // Needs a path that exists on every OS — /tmp isn't one on Windows,
-        // and SHGetFileInfo yields no icon for nonexistent paths.
-        let dir = std::env::temp_dir();
-        // First call queues the fetch.
-        assert!(c.texture(&IconKey::Folder, &dir).is_none());
-        // Wait for the worker + pump results into textures.
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    fn identity_sharing_and_native_application_keys() {
+        assert_eq!(
+            IconKey::for_entry_path(EntryKind::File, Path::new("a.ts")),
+            IconKey::for_entry_path(EntryKind::File, Path::new("b.ts"))
+        );
+        assert_ne!(
+            IconKey::for_entry_path(EntryKind::File, Path::new("Cargo.toml")),
+            IconKey::for_entry_path(EntryKind::File, Path::new("generic.toml"))
+        );
+        assert_ne!(
+            IconKey::for_entry_path(EntryKind::Dir, Path::new("A.app")),
+            IconKey::for_entry_path(EntryKind::Dir, Path::new("B.app"))
+        );
+        for (pixels, want) in [
+            (16.0, 16),
+            (17.0, 24),
+            (33.0, 48),
+            (100.0, 128),
+            (400.0, 512),
+        ] {
+            assert_eq!(size_bucket(pixels), want);
+        }
+    }
+    #[test]
+    fn bounded_queue_and_negative_cache() {
+        let cache = IconCache::new();
         let ctx = egui::Context::default();
-        loop {
-            if c.pump(&ctx) > 0 {
-                break;
-            }
-            assert!(std::time::Instant::now() < deadline, "icon never arrived");
-            std::thread::sleep(std::time::Duration::from_millis(10));
+        let path = std::env::temp_dir();
+        for i in 0..1000 {
+            cache.texture(&IconKey::Ext(format!("unknown{i}")), &path);
         }
-        #[cfg(any(target_os = "macos", target_os = "windows"))]
-        assert!(c.texture(&IconKey::Folder, &dir).is_some());
-        // No OS icon provider here: the negative result must be cached —
-        // a re-lookup must return None without queueing another fetch.
-        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-        {
-            assert!(c.texture(&IconKey::Folder, &dir).is_none());
-            assert!(c.in_flight.lock().unwrap().is_empty());
+        assert!(cache.stats().pending <= MAX_PENDING);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while cache.stats().pending > 0 {
+            cache.pump(&ctx);
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(std::time::Duration::from_millis(5));
         }
+        assert!(cache.stats().entries <= MAX_CACHED);
+        assert!(cache.stats().texture_bytes <= MAX_BYTES);
+        let key = IconKey::Folder;
+        cache.texture(&key, &path);
+        while cache.stats().pending > 0 {
+            cache.pump(&ctx);
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        let requests = cache.stats().requests;
+        cache.texture(&key, &path);
+        assert_eq!(cache.stats().requests, requests);
+        cache.set_source(IconSource::Flux);
+        assert!(
+            cache.stats().entries > 0,
+            "source preference flushed unrelated native entries"
+        );
+    }
+    #[test]
+    fn lru_does_not_clear_hot_entries() {
+        let cache = IconCache::new();
+        let hot = Request {
+            key: IconKey::Folder,
+            pixels: 32,
+            dark: false,
+            generation: 0,
+        };
+        cache.map.borrow_mut().insert(
+            hot.clone(),
+            Cached {
+                texture: None,
+                touched: 10000,
+                bytes: 0,
+            },
+        );
+        for i in 0..MAX_CACHED - 1 {
+            cache.map.borrow_mut().insert(
+                Request {
+                    key: IconKey::Ext(i.to_string()),
+                    pixels: 32,
+                    dark: false,
+                    generation: 0,
+                },
+                Cached {
+                    texture: None,
+                    touched: i as u64,
+                    bytes: 0,
+                },
+            );
+        }
+        trim_cache(&mut cache.map.borrow_mut(), 0);
+        assert!(cache.map.borrow().contains_key(&hot));
+        assert_eq!(cache.stats().entries, MAX_CACHED - 1);
     }
 }

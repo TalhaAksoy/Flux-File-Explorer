@@ -41,66 +41,13 @@ pub struct RowAction {
 /// 16-px-ish painted glyphs: folder silhouette, document with folded corner,
 /// symlink arrow. Vector painting avoids icon-font coverage issues entirely.
 pub fn paint_entry_icon(p: &egui::Painter, rect: egui::Rect, kind: EntryKind, pal: &Palette) {
-    match kind {
-        EntryKind::Dir => {
-            // Two-tone folder: darker back + tab, lighter front body —
-            // keeps the silhouette legible down to ~12px.
-            let (w, h) = (rect.width(), rect.height());
-            let dark = pal.dir_icon.gamma_multiply(0.62);
-            let light = pal.dir_icon;
-            let tab = egui::Rect::from_min_size(rect.min, Vec2::new(w * 0.44, h * 0.34));
-            p.rect_filled(tab, 1.5, dark);
-            let back = egui::Rect::from_min_max(
-                egui::pos2(rect.left() + w * 0.4, rect.top() + h * 0.12),
-                egui::pos2(rect.right(), rect.top() + h * 0.42),
-            );
-            p.rect_filled(back, 1.5, dark);
-            let body =
-                egui::Rect::from_min_max(egui::pos2(rect.left(), rect.top() + h * 0.32), rect.max);
-            p.rect_filled(body, 2.0, light);
-            // Sheen line across the front edge.
-            p.line_segment(
-                [
-                    body.left_top() + Vec2::new(1.0, 0.5),
-                    body.right_top() + Vec2::new(-1.0, 0.5),
-                ],
-                (0.8, Color32::WHITE.gamma_multiply(0.35)),
-            );
-        }
-        EntryKind::Symlink => {
-            let body = rect.shrink(1.0);
-            p.rect_stroke(body, 1.5, (1.0, pal.link_icon), egui::StrokeKind::Inside);
-            let c = body.center();
-            p.line_segment(
-                [c - Vec2::new(3.5, 0.0), c + Vec2::new(2.5, 0.0)],
-                (1.4, pal.link_icon),
-            );
-            p.line_segment(
-                [c + Vec2::new(0.5, -2.5), c + Vec2::new(2.5, 0.0)],
-                (1.4, pal.link_icon),
-            );
-            p.line_segment(
-                [c + Vec2::new(0.5, 2.5), c + Vec2::new(2.5, 0.0)],
-                (1.4, pal.link_icon),
-            );
-        }
-        _ => {
-            let body = rect.shrink(1.0);
-            p.rect_stroke(body, 1.5, (1.0, pal.file_icon), egui::StrokeKind::Inside);
-            let w = body.width() * 0.3;
-            let h = body.height() * 0.3;
-            let corner = vec![
-                egui::pos2(body.right() - w, body.top()),
-                egui::pos2(body.right(), body.top() + h),
-                egui::pos2(body.right() - w, body.top() + h),
-            ];
-            p.add(egui::Shape::convex_polygon(
-                corner,
-                Color32::TRANSPARENT,
-                (1.0, pal.file_icon),
-            ));
-        }
-    }
+    let id = match kind {
+        EntryKind::Dir => flux_core::file_type::IconId::Folder,
+        EntryKind::Symlink => flux_core::file_type::IconId::Symlink,
+        EntryKind::Other => flux_core::file_type::IconId::Special,
+        EntryKind::File => flux_core::file_type::IconId::Unknown,
+    };
+    crate::file_icons::paint(p, rect, id, pal);
 }
 
 /// Largest centered rect inside `outer` that keeps `img`'s aspect ratio.
@@ -301,7 +248,7 @@ pub fn file_table(app: &mut FluxApp, ui: &mut egui::Ui) -> RowAction {
         }
         body.rows(row_h, view_len, |mut row| {
             let row_idx = row.index();
-            let (idx, name, kind, size, mtime, ext, icon_key, abs_path, hidden) = {
+            let (idx, name, kind, size, mtime, abs_path, hidden) = {
                 let s = match snap.read() {
                     Ok(s) => s,
                     Err(_) => return,
@@ -315,8 +262,6 @@ pub fn file_table(app: &mut FluxApp, ui: &mut egui::Ui) -> RowAction {
                     e.kind,
                     e.size,
                     e.mtime,
-                    e.extension().map(|x| x.to_string_lossy().into_owned()),
-                    crate::icon_cache::IconKey::for_entry(e, &s.path.join(&e.name)),
                     s.path.join(&e.name),
                     e.hidden,
                 )
@@ -339,12 +284,9 @@ pub fn file_table(app: &mut FluxApp, ui: &mut egui::Ui) -> RowAction {
                 } else {
                     None
                 };
-                let tex = thumb
-                    .as_ref()
-                    .map(|t| t.id())
-                    .or_else(|| icons.texture(&icon_key, &abs_path));
-                match tex {
-                    Some(tex) => {
+                match thumb.as_ref() {
+                    Some(handle) => {
+                        let tex = handle.id();
                         // Thumbs keep aspect; kind icons are already square.
                         let r = match &thumb {
                             Some(h) => fit_rect(icon_rect, h.size_vec2()),
@@ -357,7 +299,11 @@ pub fn file_table(app: &mut FluxApp, ui: &mut egui::Ui) -> RowAction {
                             Color32::WHITE.gamma_multiply(ghost),
                         );
                     }
-                    None => paint_entry_icon(ui.painter(), icon_rect, kind, &pal),
+                    None => {
+                        let mut painter = ui.painter().clone();
+                        painter.multiply_opacity(ghost);
+                        icons.paint(&painter, icon_rect, kind, &abs_path, &pal);
+                    }
                 }
                 let text_pos = egui::pos2(rect.left() + row_h * 1.05, rect.center().y);
                 ui.painter().text(
@@ -378,12 +324,8 @@ pub fn file_table(app: &mut FluxApp, ui: &mut egui::Ui) -> RowAction {
             });
             row.col(|ui| {
                 ui.label(
-                    egui::RichText::new(match kind {
-                        EntryKind::Dir => "Folder",
-                        EntryKind::Symlink => "Link",
-                        _ => flux_platform::type_label(ext.as_deref()),
-                    })
-                    .color(meta_col),
+                    egui::RichText::new(icons.file_type(kind, &abs_path).info().label)
+                        .color(meta_col),
                 );
             });
 
@@ -488,7 +430,7 @@ fn compact_list(app: &mut FluxApp, ui: &mut egui::Ui, pal: &Palette) -> RowActio
     builder.body(|body| {
         body.rows(row_h, view_len, |mut row| {
             let row_idx = row.index();
-            let (idx, name, kind, icon_key, abs_path, hidden) = {
+            let (idx, name, kind, abs_path, hidden) = {
                 let s = match snap.read() {
                     Ok(s) => s,
                     Err(_) => return,
@@ -500,7 +442,6 @@ fn compact_list(app: &mut FluxApp, ui: &mut egui::Ui, pal: &Palette) -> RowActio
                     idx,
                     e.display_name().into_owned(),
                     e.kind,
-                    crate::icon_cache::IconKey::for_entry(e, &s.path.join(&e.name)),
                     s.path.join(&e.name),
                     e.hidden,
                 )
@@ -512,17 +453,9 @@ fn compact_list(app: &mut FluxApp, ui: &mut egui::Ui, pal: &Palette) -> RowActio
             row.col(|ui| {
                 let rect = ui.available_rect_before_wrap();
                 let icon_rect = row_icon_rect(rect, row_h);
-                match icons.texture(&icon_key, &abs_path) {
-                    Some(tex) => {
-                        ui.painter().image(
-                            tex,
-                            icon_rect,
-                            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                            Color32::WHITE.gamma_multiply(ghost),
-                        );
-                    }
-                    None => paint_entry_icon(ui.painter(), icon_rect, kind, pal),
-                }
+                let mut painter = ui.painter().clone();
+                painter.multiply_opacity(ghost);
+                icons.paint(&painter, icon_rect, kind, &abs_path, pal);
                 ui.painter().text(
                     egui::pos2(rect.left() + row_h * 1.05, rect.center().y),
                     egui::Align2::LEFT_CENTER,
@@ -644,7 +577,7 @@ fn icon_grid(app: &mut FluxApp, ui: &mut egui::Ui, pal: &Palette, cell_w: f32) -
                         if row_idx >= view_len {
                             break;
                         }
-                        let (idx, name, kind, icon_key, abs_path, hidden) = {
+                        let (idx, name, kind, abs_path, hidden) = {
                             let s = match snap.read() {
                                 Ok(s) => s,
                                 Err(_) => return,
@@ -656,7 +589,6 @@ fn icon_grid(app: &mut FluxApp, ui: &mut egui::Ui, pal: &Palette, cell_w: f32) -
                                 idx,
                                 e.display_name().into_owned(),
                                 e.kind,
-                                crate::icon_cache::IconKey::for_entry(e, &s.path.join(&e.name)),
                                 s.path.join(&e.name),
                                 e.hidden,
                             )
@@ -703,12 +635,9 @@ fn icon_grid(app: &mut FluxApp, ui: &mut egui::Ui, pal: &Palette, cell_w: f32) -
                             } else {
                                 None
                             };
-                        let tex = thumb
-                            .as_ref()
-                            .map(|t| t.id())
-                            .or_else(|| icons.texture(&icon_key, &abs_path));
-                        match tex {
-                            Some(tex) => {
+                        match thumb.as_ref() {
+                            Some(handle) => {
+                                let tex = handle.id();
                                 let r = match &thumb {
                                     Some(h) => fit_rect(icon_rect, h.size_vec2()),
                                     None => icon_rect,
@@ -723,7 +652,11 @@ fn icon_grid(app: &mut FluxApp, ui: &mut egui::Ui, pal: &Palette, cell_w: f32) -
                                     Color32::WHITE.gamma_multiply(ghost),
                                 );
                             }
-                            None => paint_entry_icon(ui.painter(), icon_rect, kind, pal),
+                            None => {
+                                let mut painter = ui.painter().clone();
+                                painter.multiply_opacity(ghost);
+                                icons.paint(&painter, icon_rect, kind, &abs_path, pal);
+                            }
                         }
                         // Name line: centered, clipped to the cell.
                         let name_rect = egui::Rect::from_min_max(

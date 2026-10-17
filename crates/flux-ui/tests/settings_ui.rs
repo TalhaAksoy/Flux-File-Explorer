@@ -437,7 +437,7 @@ fn dump_pages() {
 fn every_segmented_cell_gets_a_unique_widget_id() {
     let (ctx, mut app) = settings_app();
     frame(&ctx, &mut app, input(Vec::new()));
-    for page in 0..2 {
+    for page in 0..3 {
         let cells = segmented_cells(&ctx, page);
         let ids: Vec<egui::Id> = click_rects(&ctx)
             .into_iter()
@@ -451,4 +451,30 @@ fn every_segmented_cell_gets_a_unique_widget_id() {
             "duplicate widget id in control {page}"
         );
     }
+}
+
+#[test]
+fn icon_source_clicks_are_independent_and_persist() {
+    let (ctx, mut app) = settings_app();
+    frame(&ctx, &mut app, input(Vec::new()));
+    let cells = segmented_cells(&ctx, 2);
+    assert_eq!(cells.len(), 3, "Flux/System/Automatic control missing");
+    let before = (app.settings.theme, app.density);
+    click_at(&ctx, &mut app, cells[0].center());
+    assert_eq!(app.settings.icon_source, flux_settings::IconSource::Flux);
+    assert_eq!(app.icons.source(), flux_settings::IconSource::Flux);
+    assert_eq!((app.settings.theme, app.density), before);
+    click_at(&ctx, &mut app, cells[1].center());
+    assert_eq!(app.settings.icon_source, flux_settings::IconSource::System);
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("settings.json");
+    flux_settings::save_to(&app.settings, &path).unwrap();
+    let loaded = flux_settings::load_from(&path);
+    assert_eq!(loaded.icon_source, flux_settings::IconSource::System);
+    let restored = FluxApp::from_settings(loaded);
+    assert_eq!(restored.icons.source(), flux_settings::IconSource::System);
+    let mut legacy = serde_json::to_value(flux_settings::Settings::default()).unwrap();
+    legacy.as_object_mut().unwrap().remove("icon_source");
+    let migrated: flux_settings::Settings = serde_json::from_value(legacy).unwrap();
+    assert_eq!(migrated.icon_source, flux_settings::IconSource::Automatic);
 }

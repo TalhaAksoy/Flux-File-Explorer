@@ -17,6 +17,7 @@ egui_extras.workspace = true
 eframe.workspace = true
 jiff.workspace = true
 rustc-hash.workspace = true
+serde_json.workspace = true
 tracing.workspace = true
 portable-pty.workspace = true
 alacritty_terminal.workspace = true
